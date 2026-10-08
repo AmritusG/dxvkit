@@ -5,6 +5,9 @@ pseudocode. "Must" here means "or Resolume / a conforming decoder may not play i
 Resolume's own encoders (Alley, and the codec inside Adobe Media Encoder) write, measured on the files
 described in `docs/cleanroom/INVENTORY.md`.
 
+Revised in W4 (2026-10-08, Phase A): BC3 endpoint order, alpha convention, the extra Y opcode, selector 3
+and the single-symbol rule (4, 7.1, 7.3).
+
 ## 1. Container
 
 - One QuickTime video track; sample-entry FourCC `DXD3` for all four DXV3 variants. Use the field values
@@ -37,12 +40,15 @@ described in `docs/cleanroom/INVENTORY.md`.
 - BC1 for `DXT1`: the texture is opaque. Do not use index 3 of the three-colour mode (colour 0 <= colour
   1): Resolume never does, and a decoder that uploads with a punch-through BC1 format would show holes.
   Solid blocks with colour 0 = colour 1 are fine (observed often).
-- BC3 for `DXT5`: the colour half is always decoded with the four-colour palette, whatever the endpoint
-  order.
+- BC3 for `DXT5`: the spec decodes the colour half with the four-colour palette whatever the endpoint
+  order, but some readers (FFmpeg) apply the BC1 three-colour rule when colour 0 <= colour 1. Order every
+  colour half as a four-colour BC1 block: colour 0 > colour 1, or colour 0 = colour 1 with no pixel on
+  index 3. Resolume always does (DXV_FORMAT.md 8.2: 0 of 78 million colour halves have colour 0 <
+  colour 1).
 - BC4 for Y / A / Co / Cg: unsigned.
-- Alpha convention: Alley writes straight (unpremultiplied) colour; the codec in Adobe Media Encoder wrote
-  premultiplied-looking colour (DXV_FORMAT.md 8.5). Pick straight to match Alley unless Arena testing
-  shows otherwise (open question for Amrit).
+- Alpha convention: the file has no field for it. Alley writes straight (unpremultiplied) colour; the
+  codec in Adobe Media Encoder wrote premultiplied-looking colour; GlEnc varies (writers and readers table:
+  DXV_FORMAT.md 8.5). Write straight, like Alley.
 
 ## 5. YCoCg (HQ variants)
 
@@ -92,8 +98,9 @@ What the decoder accepts, restated as encoder obligations:
   next section starts right after the last opcode stream of the previous one; the payload ends right after
   section 2's last opcode stream (observed).
 - The opcode count in the header is the number of opcodes actually emitted for that channel. It must not
-  exceed the channel's block count. (Resolume once emitted one dangling opcode after the texture was
-  complete; avoid that: decoders ignore it but it wastes bytes.)
+  exceed the channel's block count. Resolume's `YCG6` encoder emits one extra Y opcode in almost every
+  frame, coding one block past the Y plane (the first Co block; DXV_FORMAT.md 7.5). Do not copy that:
+  decoders ignore it, but it wastes bytes and a careless decoder would write past the plane.
 
 ### 7.2 Choosing opcodes
 
@@ -113,8 +120,10 @@ What the decoder accepts, restated as encoder obligations:
 ### 7.3 Opcode stream coding
 
 - Stored (first byte 0x00, then the opcodes) and fill (0x01, value) are always valid. Use fill when every
-  opcode is the same.
-- Entropy coding (selector 2 or 3 in the low bits of the first byte; Resolume uses it for normal content;
+  opcode is the same (the entropy coding cannot express a single-symbol stream, DXV_FORMAT.md 7.3.1).
+  Resolume itself writes stored for streams of 1 to 3 opcodes and never fill.
+- Entropy coding (selector 2 in the low bits of the first byte; 3 is read the same way but no encoder
+  writes it, DXV_FORMAT.md 7.3.4; Resolume uses it for normal content;
   on the Alley 1080p YCG6 vector it codes 15,423 Y opcodes in 5,796 bytes, 38 % of the stored size):
   - Normalise the opcode histogram to counts summing to exactly 1024 (every used symbol at least 1).
   - Write the counts with the variable width rule of DXV_FORMAT.md 7.3.1, LSB first, starting right
@@ -134,4 +143,5 @@ What the decoder accepts, restated as encoder obligations:
 
 Decode every packet you write with a decoder built from DXV_FORMAT.md and compare the block streams with
 the ones you meant to write (they must be identical: the layers are lossless). Then check: payload ends
-exactly where expected, no unused opcodes, literal area exactly filled, sample size = 12 + payload length.
+exactly where expected, no unused opcodes, literal area exactly filled, sample size = 12 + payload length,
+every BC3 colour half ordered as in section 4.

@@ -143,3 +143,44 @@ dump-samples, check --histogram), `tools/imageio.c` (PNG / PAM / PPM input via t
 licence, used by dxvtool only), `tools/fuzz_encode.c`, `tools/oracle.sh`, `docs/design-encoder.md`,
 QUESTIONS 10-20 and this entry. No third-party code is vendored: the BCn encoders, the FSE encoder and
 the QuickTime writer are our own.
+
+## Phase A addendum (W4, the dirty room: spec cleanup)
+
+- Session: Claude Code (Claude Opus 5.5), session `ba6ede15-2402-4047-b5fd-4dca996dcc5c`, on Amrit's
+  MacBook Pro (Apple M3 Max), working directory `~/Documents/claude/DXVKit`. Fresh session after /clear;
+  it did not reuse the W3 encoder session's context.
+- Date: 2026-10-08, roughly 14:50-15:55 UTC.
+- Brief: `docs/handoffs/dxvkit_2026-10-08_w4-spec-cleanup-brief.md` (by Cowork). The brief allowed this
+  session to read FFmpeg and Glance / GlEnc source.
+
+### Read
+
+| What | Why |
+|---|---|
+| `CLAUDE.md`, Amrit's global `~/.claude/CLAUDE.md`, the W4 brief, the W1 results handoff | rules, the findings to correct |
+| `docs/spec/*`, `docs/cleanroom/*`, `test_vectors/README.md`, `test_vectors/vectors.tsv` | the documents being revised |
+| About 100 lines of `src/hq.c` (DXVKit's own MIT decoder, the end-of-section accounting) | to know what `dxvtool check` reports. Direction dirty -> clean is not a contamination risk; recorded for completeness |
+| Real DXV files on this Mac (Spotlight list, 674 files after excluding DXVKit's own outputs and copies of its vectors; read as data, none copied) | measurements for W4-1 .. W4-5 (`QUESTIONS.md`) |
+| Resolume Arena 7.28 via its MCP server: clip list and one clip's parameters, read only | whether Arena exposes an alpha setting |
+
+### Upstream source: attempted, not read
+
+The session tried to fetch FFmpeg's `dxv.c` / `dxvenc.c` / `texturedsp*.c` from GitHub and to open the
+local `~/Downloads/dxv.c`; the Claude Code permission layer refused both, and the session did not work
+around it. **No FFmpeg, Glance, GlEnc, CueGlance or MaCrate source was read in W4.** Every W4 fact comes
+from measuring files, from black-box runs, or from the existing spec.
+
+### Black-box use
+
+FFmpeg 8.1.1 (Homebrew binary): decoded the Alley `YCG6` / `YG10` vectors and copies with altered
+opcode-stream selectors (framemd5). DXVKit's `dxvtool` (build/): `info`, `check`, `dump-blocks`,
+`dump-rgba`, `verify`.
+
+### Wrote
+
+Prose and tables in `docs/spec/DXV_FORMAT.md`, `docs/spec/ENCODING_NOTES.md`, `docs/cleanroom/QUESTIONS.md`
+(W4 section and status cells), this entry; one synthetic vector (a byte-patched copy of the Alley `YCG6`
+vector, its reference outputs copied from that vector), `vectors.tsv`, `MANIFEST.sha256`,
+`test_vectors/README.md`. Scratch scripts (a QuickTime sample reader, an HQ probe written from spec
+section 7, statistics scripts, the selector patcher) stayed in the session's scratch folder and are not
+committed. Nothing in `src/`, `include/`, `swift/`, `tools/` was changed.

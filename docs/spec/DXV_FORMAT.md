@@ -6,6 +6,11 @@ and no pseudocode. Everything marked **measured** was checked on real files and 
 `test_vectors/`; everything marked **unobserved** is described for completeness but never appeared in a
 real file on the reference machine.
 
+Revised in W4 (2026-10-08, Phase A, dirty room; `docs/handoffs/dxvkit_2026-10-08_w4-spec-cleanup-results.md`):
+2.3 (wording), 7.3 (selector 3, the codings Resolume uses, single-symbol tables), 7.5 (the extra Y opcode
+Resolume writes, and what is legal), 8.2 (colour endpoint order), 8.5 (alpha convention by writer and
+reader), section 10.
+
 Conventions: all multi-byte integers inside DXV packets are **little-endian** unless stated otherwise
 (QuickTime container fields are big-endian, as always in QuickTime). `u8`, `u16`, `u32` = unsigned
 integers of 1, 2, 4 bytes. Bit 0 = least significant bit. "Block" = one 4x4-pixel compressed block.
@@ -102,7 +107,8 @@ FourCCs other than `DXD3` and `DXDI` (for example `DXV3`, `DXT1`, `DXT5`, `YCG6`
 of 16:** coded width `CW = ceil16(W)`, coded height `CH = ceil16(H)`, where W x H is the display size.
 
 **Measured** (by finding the only texture size whose decoding consumes the packet exactly, with every
-opcode used and every literal byte read):
+opcode used and every literal byte read; for Resolume `YCG6`, exactly apart from the one extra Y opcode
+described in 7.5):
 
 | File (writer) | Display | Size that decodes exactly |
 |---|---|---|
@@ -373,10 +379,16 @@ The low two bits of an opcode stream's first byte select its coding:
 |---|---|---|
 | 0 | **stored**: the opcodes are the next `count` bytes (the first byte is skipped; its upper 6 bits are ignored) | 1 + count |
 | 1 | **fill**: every opcode equals the next byte | 2 |
-| 2 or 3 | **entropy-coded** (FSE / tANS, table log 10): a frequency table that begins at the first byte, then a bitstream | table length + bitstream area length |
+| 2 | **entropy-coded** (FSE / tANS, table log 10): a frequency table that begins at the first byte, then a bitstream | table length + bitstream area length |
+| 3 | the same as 2 (7.3.4); never written | as for 2 |
 
-`count` is the opcode count from the section header. **Measured:** Resolume writes entropy-coded streams
-for normal content and the stored coding for tiny ones (a 2-opcode stream); GlEnc writes stored and fill.
+`count` is the opcode count from the section header.
+
+**Measured** (W4: every opcode stream of the 142 Resolume HQ files on the reference machine, 45,980
+packets, 139,970 streams): selector 2 in 138,651 streams; stored in 1,319, each a stream of 1 to 3
+opcodes (1,309 of them a 3-opcode alpha channel in `YG10`, i.e. an almost uniform alpha plane); fill in
+none; selector 3 in none. Resolume therefore writes the entropy coding for normal content and the
+stored coding for tiny streams, never fill. GlEnc writes stored and fill (5,534 streams), never 2 or 3.
 
 Resolume's Alley ships a licence notice for "FSE: Finite State Entropy coder" (Yann Collet, BSD 2-Clause);
 the entropy coding below is that family (a tabled asymmetric numeral system). Public descriptions: Yann
@@ -404,6 +416,11 @@ counts read. (A u16 none of whose bits were used is not part of the table.)
 Reject: a count larger than the remaining total; more than 256 counts; running out of payload.
 
 Symbols after the last non-zero count have count 0. A symbol value is an opcode (7.4).
+
+A table with a single symbol cannot be written: the first count is read with width 10 (at most 1023) and
+the width never grows, so no count can reach 1024. Every entropy-coded stream therefore has at least two
+symbols with non-zero counts; a stream whose opcodes are all equal is written with the stored or fill
+coding.
 
 #### 7.3.2 Decoding table
 
@@ -434,6 +451,19 @@ past the payload end; decoding would consume a bit below bit 0.
 **Measured:** in every Resolume entropy stream decoded (28 streams, Alley and AME), exactly 32 bits are
 left unconsumed: L = 32 + the number of bits the decoder consumes (10 + all bit counts, including the read
 after the last symbol).
+
+#### 7.3.4 Selector 3
+
+Selector 3 means exactly what selector 2 means: the same frequency table (its first two bits, the
+selector, are skipped in the same way) and the same bitstream. A decoder MUST decode it like 2. An encoder
+MUST write 2.
+
+Evidence (W4): no encoder found writes 3 (0 of 139,970 Resolume streams, 0 GlEnc or FFmpeg-written
+streams). Black box: FFmpeg 8.1.1's decoder gives bit-identical frames (framemd5) for the Alley `YCG6`
+and `YG10` vectors (6 frames) with the selector byte of each of their 21 entropy-coded streams changed
+from 2 to 3; as a control, changing them to 0 makes it reject every frame. The vector
+`synthetic-dxv3_ycg6-fse-selector3_testsrc2_1920x1080` holds the `YCG6` case; its expected block streams
+are the Alley vector's.
 
 ### 7.4 Block reconstruction
 
@@ -507,17 +537,50 @@ needed after the channel's opcodes are used up.
 ### 7.5 End of a section and what is ignored
 
 A channel is complete when its last block is written. Then:
-- opcodes left unused are ignored (**measured:** Resolume occasionally emits one dangling opcode, e.g. a
-  literal block after a final run that already reached the end: 480 x 360 clip, every frame);
-- literal bytes left unread before the opcode area are ignored (same clip).
+- opcodes left unused (the header's count is larger than the number of opcodes the channel needed) are
+  ignored: a decoder MUST NOT apply them to the texture and MUST NOT reject the packet because of them. It
+  MAY still decode them from the opcode stream to check that the stream itself is well formed;
+- literal bytes left unread before the opcode-area offset are ignored.
 
-A decoder SHOULD reject a literal read that would go past the opcode-area offset (every observed stream
-keeps its literals inside the literal area) and MUST reject one that would go past the payload.
+The header bound of 7.2 (opcode count no larger than the channel's block count) still holds with one extra
+opcode: the first block of a channel takes no opcode, so a channel needs at most (blocks - 1) opcodes.
 
-Note on texture size: if a decoder wrongly uses CH = H rounded to 4 (not 16), it stops early, leaves
-opcodes unused, and with large frames its "count <= number of blocks" check can fail by one (an
-off-by-one that one existing decoder works around with a +1 tolerance). With the 16-row coded height of
-2.3 every observed stream decodes exactly and no tolerance is needed.
+**Measured (W4): Resolume's `YCG6` streams carry one extra opcode in the Y channel.**
+
+| Resolume files on the reference machine | Packets | Packets with an extra opcode |
+|---|---|---|
+| `YCG6`, 134 files (`~/Movies/Mac Studio Builds/videos_renamed`, `~/Movies`, `~/Movies/Testfiles` and its subfolders, the GlEnc reference corpus), Alley and the Adobe Media Encoder codec | 43,950 | 43,707 |
+| `YG10`, 8 files (`~/Movies/Testfiles` and subfolders, the GlEnc reference corpus) | 2,030 | 0 |
+
+- It is always exactly one opcode, always in section 1 (the Y channel), never in a chroma channel. Its
+  literal bytes are exactly the unread end of section 1's literal area; nothing else is left over, and
+  every entropy-coded stream still leaves exactly 32 bits (7.3.3).
+- It is the coding of one block **past the end of the Y plane**, and that block is the first block of
+  the Co channel (section 2, channel 0, block 0). Checked by decoding the extra opcode on 4 frames of the
+  Alley / AME vectors (opcode 3: its 8 literal bytes equal Co block 0) and 4 frames of a 908 x 2276 clip
+  (opcodes 2 and 7: back-references to Y blocks that happen to equal Co block 0). So the opcode value
+  varies; any of the 18 can occur. The Y opcode before it was, in every frame checked, a run (opcode 0)
+  that ended exactly on the plane's last block.
+- Exceptions (243 packets, all accounted for): the only `YCG6` file whose display size is a multiple of
+  16 in both directions (512 x 1280, 241 packets) has no extra opcode at all; and one packet in each of
+  two 1080-packet 908 x 2276 clips has none (in the one checked, the clip's first packet).
+- Earlier wording corrected: the W1 results handoff (finding 2) said that with 16 x 16 padding "every
+  Resolume stream uses every opcode and every literal exactly". That is true of `DXT1`, `DXT5`, `YG10` and
+  of every chroma section, but not of the Y channel of Resolume `YCG6`.
+
+What is legal:
+
+| Situation | Encoder | Decoder |
+|---|---|---|
+| unused opcodes after a channel is complete | SHOULD NOT write them (Resolume does, see above); the count MUST NOT exceed the channel's block count | MUST ignore them and MUST NOT write them into the texture (the extra Resolume opcode would write past the Y plane); MAY decode them to validate the stream |
+| literal bytes left before the opcode-area offset | SHOULD NOT leave any | MUST ignore them |
+| literal read past the opcode-area offset | MUST NOT need one | SHOULD reject (every observed stream keeps its literals inside the literal area); MUST reject past the payload |
+| bits left in an entropy-coded stream | SHOULD leave exactly 32 (7.3.3) | MUST NOT reject for unread bits; MUST reject a read below bit 0 |
+
+Note on texture size: if a decoder wrongly uses CH = H rounded to 4 (not 16), it stops early, leaves more
+opcodes unused, and with large frames its "count <= number of blocks" check can fail by one, because of
+the extra Resolume opcode (one existing decoder works around this with a +1 tolerance). With the 16-row
+coded height of 2.3 every observed stream passes the bound and no tolerance is needed.
 
 ### 7.6 HQ output
 
@@ -559,6 +622,27 @@ read as a little-endian 48-bit number). If alpha 0 > alpha 1: palette = a0, a1, 
 ((7 - i) a0 + i a1) / 7 for i = 1..6; else a0, a1, ((5 - i) a0 + i a1) / 5 for i = 1..4, then 0, 255.
 Bytes 8..15: a BC1 colour block that always uses the four-colour palette.
 
+**Colour endpoint order.** Readers disagree on a BC3 colour half whose colour 0 <= colour 1: this spec,
+the BC3 definition and GPUs use the four-colour palette, but some CPU decoders apply the BC1 three-colour
+rule (black box: FFmpeg 8.1.1 does, `docs/cleanroom/QUESTIONS.md` item 10). The two readings differ for
+colour 0 < colour 1 in indices 2 and 3, and for colour 0 = colour 1 in index 3 only.
+
+- A writer MUST make every BC3 colour half read the same either way: colour 0 > colour 1 (as unsigned
+  u16), or colour 0 = colour 1 with no pixel using index 3.
+- A reader SHOULD use the four-colour palette. It will then agree with every Resolume file and with GPU
+  upload; a reader that applies the BC1 rule also decodes Resolume's files correctly (measured below),
+  but not every other writer's.
+
+**Measured (W4):** 298 Resolume-written `DXT5` files on the reference machine (the `Resolume` string in the
+container, which Alley and the Adobe Media Encoder codec both write; folders `~/Movies` and its
+subfolders, `~/Downloads`, the story-arc project folders, the Resolume Wire documentation, the GlEnc
+reference corpus), two frames each (the first and the
+middle one): 78,358,368 colour halves; colour 0 > colour 1 in 69,565,985, colour 0 = colour 1 in 8,792,383
+(none of them using index 3), colour 0 < colour 1 in **none**. Other writers: one GlEnc experiment file
+(`~/Movies/GlEnc-scratch`, a cluster-fit test) has colour 0 < colour 1 in 1,036,411 of its 1,036,800
+colour halves, every one of them using index 2 or 3, so FFmpeg and this spec decode it differently; the
+other 41 GlEnc- and FFmpeg-labelled `DXT5` files have none.
+
 ### 8.3 BC4 (Y, A, Co, Cg)
 
 8 bytes, unsigned, the same layout and palette rule as the BC3 alpha half.
@@ -582,18 +666,40 @@ project; the reference RGBA uses it.
 
 ### 8.5 Alpha meaning
 
-The bitstream does not say whether colour is straight or premultiplied by alpha. **Measured** on the
-alpha test vectors (frame 0, every 7th pixel with 8 < alpha < 200, 133,612 pixels each):
+The bitstream does not say whether colour is straight or premultiplied by alpha: no field in the packet
+header, the sample description or the QuickTime atoms carries it, and both kinds of file exist. The only
+way to tell is to look at the pixels: in premultiplied colour no channel can exceed alpha (apart from
+block-compression error), in straight colour it often does.
 
-| Encoder | Variant | Pixels whose max(R, G, B) exceeds alpha + 24 | Reading |
+Metric (all tables below): sample pixels with 8 < alpha < 200 (every 7th pixel), share whose
+max(R, G, B) exceeds alpha + 24. Near 0 = **premultiplied-looking** (dark straight content can also look
+like this, so it is a reading, not proof); clearly above a few per cent = straight.
+
+**Writers** (W4: all 360 `DXT5` / `YG10` files on the reference machine, frames first and middle; files with
+fewer than 500 semi-transparent sample pixels (329 files) cannot be classified):
+
+| Writer | Variants | Convention | Evidence |
 |---|---|---|---|
-| Resolume Alley | DXT5 | 97.6 % | straight colour |
-| Resolume Alley | YG10 | 97.6 % | straight colour |
-| Resolume codec in Adobe Media Encoder | DXT5 | 0.1 % | colour <= alpha: premultiplied-looking |
-| Resolume codec in Adobe Media Encoder | YG10 | 0.1 % | premultiplied-looking |
+| Resolume Alley 7.28 | `DXT5`, `YG10` | straight | 4 files (the `resolume-alley` vectors' sources and copies): 97.4 % |
+| Resolume codec in Adobe Media Encoder | `DXT5`, `YG10` | premultiplied-looking | 4 files: 0.1 % |
+| Resolume, origin not recorded (`~/Movies/Testfiles`: one `DXT5`, two `YG10`) | `DXT5`, `YG10` | premultiplied-looking | 3 files: 0.0 % |
+| Resolume clips shipped in Resolume Wire's documentation | `DXT5` | straight | 7 files: 8.6 to 9.2 % (premultiplied colour could not reach this) |
+| GlEnc | `DXT5`, `YG10` | either, by version and variant | v0.5.0-candidate: `DXT5` straight (98.4 %), `YG10` premultiplied-looking (0.0 %) from the same source; older test files: 7 `DXT5` + 1 `YG10` premultiplied-looking |
+| FFmpeg's encoder | `DXT1` only | (no alpha) | |
+| DXVKit's encoder | all | what the caller passes (default straight); a flag records the caller's convention but nothing is written to the file | `docs/design-encoder.md` |
 
-So existing files carry either convention. The reference RGBA outputs are the decoded values with no
-alpha processing. How Arena composites each is an open question (see section 10).
+**Readers:**
+
+| Reader | Treats alpha files as |
+|---|---|
+| FFmpeg 8.1.1 decoder (black box, QUESTIONS 11) | `DXT5`: premultiplied: it outputs un-premultiplied colour, floor(c x 255 / a), clamped. `YG10`: planes output untouched |
+| Resolume Arena | the user chooses per clip (Amrit, W4 brief). Arena's web API does not expose the setting (a clip's parameters list opacity and blend mode only; checked W4), so its name and default are to be confirmed by Amrit |
+| DXVKit decoder | untouched by default; optional straight-to-premultiplied conversion on the RGBA path (QUESTIONS 7) |
+
+So: a writer SHOULD write straight colour (what Alley, Resolume's own encoder application, writes). A reader
+MUST NOT assume either convention silently when it composites; it SHOULD default to straight and let the
+user override per file or clip. The reference RGBA outputs in `test_vectors/` are the decoded values with
+no alpha processing.
 
 ---
 
@@ -631,8 +737,11 @@ CW x CH bytes (YG10, with alpha); HQ chroma CW x CH / 4 bytes.
 3. DXV3 version / minor / reserved bytes other than 4 / 0 / 0: never seen.
 4. Sample-entry FourCCs other than `DXD3` / `DXDI`: never seen.
 5. Straight versus premultiplied alpha (8.5): files of both kinds exist and nothing in the file says which.
-   Arena's handling is unknown.
+   W4 recorded which writer does what and how FFmpeg reads them; still open: the name and default of
+   Arena's per-clip choice (for Amrit).
 6. Chroma siting / filtering in Resolume's own HQ playback (the reference uses nearest neighbour).
 7. Resolume's forward YCoCg transform and its BC encoders (an encoder choice; see ENCODING_NOTES.md).
-8. Opcode streams with a single symbol (count 1024) in entropy mode: decodable by the rules above, never
-   seen (Resolume uses the fill coding instead).
+8. Closed (W4): an entropy-coded opcode stream with a single symbol cannot be written (7.3.1); Resolume
+   writes tiny streams with the stored coding and never uses fill (7.3).
+9. Closed (W4): opcode-stream selector 3 decodes like 2 (7.3.4).
+10. Closed (W4): the extra opcode in the Y channel of Resolume `YCG6` (7.5).

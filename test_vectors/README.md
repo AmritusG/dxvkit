@@ -1,6 +1,6 @@
 # DXVKit test vectors
 
-Produced in Phase A (W1, 2026-10-08). 46 vector files, 102 packets, 11 MB. Every reference output was
+Produced in Phase A (W1, 2026-10-08; one synthetic vector added in W4, the same day). 47 vector files, 105 packets, 12 MB. Every reference output was
 produced by running Glance's existing DXV decoder (GlanceCore as vendored in glenc-public v1.3.0, from
 AmritusG/glance e134a3a) through a dump tool that stayed in the Phase A scratch folder, twice, with
 bit-identical results (218 files). Integrity: `MANIFEST.sha256` (every file in this folder except the
@@ -12,7 +12,7 @@ manifest itself; check with `shasum -a 256 -c MANIFEST.sha256` from inside `test
 |---|---|
 | `streams/resolume/` | 8 files: Resolume's own encoders (Alley 7.28, and the Resolume codec inside Adobe Media Encoder) on a synthetic pattern (FFmpeg `testsrc2`, plus a synthesized alpha ramp for the alpha variants), 1920 x 1080. Alley files: first 3 frames; AME files: first frame. Packets and sample entry copied byte for byte from the original exports (only the frame count changed). |
 | `streams/glenc/` | 20 files: GlEnc's `glenc-cli` 1.0.0 (`-c dxt1/dxt5/ycg6/yg10 --no-audio`) on our own generated pattern (`source/`), sizes 64 x 64 (4 frames), 333 x 221, 18 x 10, 100 x 36 (3 frames), 48 x 48 (1 frame). |
-| `streams/synthetic/` | 7 files built by hand in Phase A from the GlEnc block streams of our pattern: legacy `DXDI` (LZF DXT1, stored DXT1, LZF DXT5, the "version nibble 2" implied-DXT1 rule) and DXV3 packets with the stored flag set. Real files of these kinds were not found. |
+| `streams/synthetic/` | 8 files built by hand in Phase A. Seven from the GlEnc block streams of our pattern: legacy `DXDI` (LZF DXT1, stored DXT1, LZF DXT5, the "version nibble 2" implied-DXT1 rule) and DXV3 packets with the stored flag set. One (W4) from the Alley YCG6 vector: `synthetic-dxv3_ycg6-fse-selector3_testsrc2_1920x1080`, the same 3 packets with the low two bits of the first byte of each of the 9 entropy-coded opcode streams changed from 2 to 3 (9 bytes differ); its reference outputs are the Alley vector's, unchanged (DXV_FORMAT.md 7.3). Real files of these kinds were not found. |
 | `streams/invalid/` | 11 files that a decoder MUST reject (one packet each). |
 | `reference/<vector>/` | per packet: the decoded block stream(s) and RGBA, gzip-compressed (`gzip -9n`). |
 | `source/` | the PNG frames of our pattern (the input of the GlEnc vectors). |
@@ -53,7 +53,7 @@ Coverage notes:
   stored / fill opcode codings and opcodes 0, 1, 3.
 - Odd sizes (not multiples of 4 / 16) are in the `glenc` group (18 x 10, 100 x 36, 333 x 221).
 - One-frame files: `glenc_*_pat48`, `resolume-ame_*`.
-- Legacy and stored-flag packets: `synthetic` group only.
+- Legacy and stored-flag packets, and opcode-stream selector 3: `synthetic` group only.
 
 ## Invalid vectors
 
