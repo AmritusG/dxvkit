@@ -37,7 +37,9 @@ RGBA conventions (DXV_FORMAT.md section 8): BC1 / BC3 / BC4 decoded with bit-rep
 and truncating integer interpolation; DXT1 alpha forced to 255 (the variant is opaque; Glance's CPU path
 writes alpha 0 for three-colour index 3, which no Resolume stream uses: the forcing is the only
 post-processing applied to Glance's output); HQ: YCoCg inverse with nearest-neighbour chroma
-(chroma sample (x / 2, y / 2)); no alpha (un)premultiplication. A decoder that matches the block streams
+(chroma sample (x / 2, y / 2)); no alpha (un)premultiplication. The HQ RGBA uses the W1 chroma midpoint 128 and integer BC4
+palettes; Resolume's own convention (W5, DXV_FORMAT.md 8.4) is midpoint 127.5 with float palettes and
+out-of-gamut folding, so the HQ RGBA differs from what Arena shows by about 1 in most bytes. A decoder that matches the block streams
 but uses a different BCn rounding will differ from the RGBA by about 1 in some values: compare block
 streams first.
 
@@ -72,6 +74,10 @@ Coverage notes:
 | `bad_dxdi-lzf-short-output` | LZF stream 64 bytes short of the texture | reject: wrong output length |
 
 Glance's decoder rejected all eleven (for `bad_dxv3-unknown-tag`, by having no decoder for the tag).
+
+Note (W5): `bad_dxdi-no-texture-flag` contradicts the revised spec. Resolume Arena 7.28 plays a legacy
+packet with type byte 0x03 as DXT1 (DXV_FORMAT.md 4.1), so this vector should become a `decode` vector;
+it is left unchanged until the next clean-room wave (QUESTIONS.md finding F1).
 
 ## Licence and provenance
 

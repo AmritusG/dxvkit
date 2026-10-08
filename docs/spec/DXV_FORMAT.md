@@ -11,6 +11,15 @@ Revised in W4 (2026-10-08, Phase A, dirty room; `docs/handoffs/dxvkit_2026-10-08
 Resolume writes, and what is legal), 8.2 (colour endpoint order), 8.5 (alpha convention by writer and
 reader), section 10.
 
+Revised in W5 (2026-10-08, Phase A, dirty room; `docs/handoffs/dxvkit_2026-10-08_w5-close-open-results.md`):
+2.2 (FourCCs), 3.1-3.3 (version byte, stored flag, stored HQ layout), 4.1 (legacy texture selection),
+8.1 (FFmpeg's BC1 convention), 8.2 (FFmpeg reads BC3 colour as four-colour; W4 wording corrected), 8.4
+(chroma midpoint 127.5, nearest chroma, out-of-gamut handling), 9, 10 (nothing left open). The authority
+for each forms question is **Resolume Arena 7.28 as a black box** ("Arena 7.28 behaviour"): synthetic
+files of each form were loaded into Arena, their thumbnails read, and each clip fired by Amrit; for
+the HQ colour questions Arena's composition output was captured pixel-exact (Syphon) and Alley 7.28's
+encodes of a known lossless source were measured.
+
 Conventions: all multi-byte integers inside DXV packets are **little-endian** unless stated otherwise
 (QuickTime container fields are big-endian, as always in QuickTime). `u8`, `u16`, `u32` = unsigned
 integers of 1, 2, 4 bytes. Bit 0 = least significant bit. "Block" = one 4x4-pixel compressed block.
@@ -97,9 +106,23 @@ packets; a decoder MAY determine the variant from the first packet and SHOULD st
 The sample entry's width and height are the **display size**. The coded texture size is derived from it
 (2.3).
 
-FourCCs other than `DXD3` and `DXDI` (for example `DXV3`, `DXT1`, `DXT5`, `YCG6`, `YG10`, `DXVA`,
-`DXV1`) are **unobserved** as sample-entry formats. A decoder MAY accept them and treat them like `DXD3`
-(the packet header still decides the variant).
+FourCCs other than `DXD3` and `DXDI` are **unobserved** in real files. **Arena 7.28 behaviour** (W5,
+256 x 256 files whose packets are valid DXV3 `DXT1` / `YCG6` or legacy DXT1, only the FourCC changed):
+
+| Sample-entry FourCC | Arena 7.28 |
+|---|---|
+| `DXD3`, `DXDI` | loads and plays |
+| `DXD4` | loads and plays (reported as "DXV 3.0") |
+| `DXV3`, `DXT1`, `YCG6`, `DXD1`, `DXDA` | not loaded as video (no clip appears; log: "Could not load or generate thumbnails") |
+| `DXDI` holding DXV3 packets; `DXD3` holding legacy packets | loads and plays: the packet decides the generation, not the FourCC |
+
+Rule: a decoder SHOULD accept the FourCCs `DXD3`, `DXDI` and `DXD4` and MUST NOT accept others as DXV. It
+MUST NOT use the FourCC to choose between the legacy and DXV3 packet formats; it decides per packet: a
+packet whose first four bytes are one of the four DXV3 texture tags (3.1) is a DXV3 packet, any other
+packet is legacy (4.1). How Arena itself tells them apart was not observed beyond this. A legacy packet
+could only be mistaken for DXV3 if its 24-bit length were exactly the value the tag's first three bytes
+spell (several million bytes) and its type byte the tag's fourth byte; a writer SHOULD avoid that
+legacy length.
 
 ### 2.3 Coded size (padding)
 
@@ -153,9 +176,9 @@ Every DXV3 packet begins with 12 bytes:
 | Offset | Size | Field | Meaning |
 |---|---|---|---|
 | 0 | 4 | texture tag | four ASCII bytes, stored reversed: `1TXD` = DXT1, `5TXD` = DXT5, `6GCY` = YCG6, `01GY` = YG10 (read as a little-endian u32 they equal the big-endian FourCC values of `DXT1`, `DXT5`, `YCG6`, `YG10`) |
-| 4 | 1 | format version | version + 1. **Measured:** always 4 (version 3) |
-| 5 | 1 | minor version | **measured:** always 0 |
-| 6 | 1 | stored flag | 0 = the payload is compressed; non-zero = the payload IS the block stream (3.3). **Measured:** always 0 in real files |
+| 4 | 1 | format version | version + 1. **Measured:** always 4 (version 3). Values below 4 are invalid (3.2) |
+| 5 | 1 | minor version | **measured:** always 0; any value is accepted |
+| 6 | 1 | stored flag | 0 = the payload is compressed; 1 = the payload IS the block stream (3.3); any other value is invalid (3.2). **Measured:** always 0 in real files |
 | 7 | 1 | reserved | **measured:** always 0; ignore |
 | 8 | 4 | payload length | u32: number of payload bytes that follow the header |
 
@@ -172,16 +195,36 @@ A decoder MUST reject a packet when:
 - payload length + 12 > packet size.
 
 A decoder SHOULD accept trailing bytes after the payload (payload length + 12 < packet size) and ignore
-them; none were observed. A decoder SHOULD accept any version / minor / reserved byte values and MAY log
-unusual ones.
+them; none were observed.
+
+**Arena 7.28 behaviour** for the other header bytes (W5; 256 x 256 `DXT1` packets from DXVKit's encoder,
+one byte changed; Arena shows the version it parsed as "DXV v.m" with v = version byte - 1, m = minor):
+
+| Header bytes | Arena 7.28 | Rule |
+|---|---|---|
+| version byte 4 (control), 5, 6 (also 5 on `YCG6`) | plays correctly ("DXV 3.0", "4.0", "5.0") | accept |
+| version byte 3, 0 | loads, plays **black** ("DXV 2.0", "DXV -1.0") | MUST reject |
+| minor byte 1 | plays correctly ("DXV 3.1") | accept any value |
+| reserved byte 1 | plays correctly | ignore |
+| stored flag 2, with a stored payload or with a compressed one | loads, plays **black** | MUST reject |
+
+So: a decoder MUST reject a version byte below 4 and a stored flag other than 0 or 1; it MUST accept
+any version byte of 4 or more and any minor and reserved value, and MAY log unusual ones.
 
 ### 3.3 Stored payloads
 
-When the stored flag is non-zero the payload is the uncompressed result: for `DXT1` the BC1 stream, for
-`DXT5` the BC3 stream, each exactly as long as the coded texture needs (2.3). The payload MUST be at least
-that long (reject otherwise); extra bytes are ignored. The stored flag with `YCG6` / `YG10` is
-**unobserved** and undefined; a decoder SHOULD reject it. (Test vectors:
-`synthetic-dxv3_dxt1-rawflag_pat64`, `synthetic-dxv3_dxt5-rawflag_pat64`.)
+When the stored flag is 1 the payload is the uncompressed result, exactly as long as the coded texture
+needs (2.3): for `DXT1` the BC1 stream, for `DXT5` the BC3 stream, for `YCG6` the Y stream (BC4, CW x CH
+/ 2 bytes) immediately followed by the chroma stream (16-byte Co+Cg blocks, CW x CH / 4 bytes), for
+`YG10` the Y+A stream (16-byte blocks, Y then A, CW x CH bytes) immediately followed by the chroma
+stream. These are the same byte layouts as the reference outputs (7.6). The payload MUST be at least
+that long (reject otherwise); extra bytes are ignored.
+
+Stored payloads are **unobserved** in real files. **Arena 7.28 behaviour** (W4 and W5): it plays
+stored-flag `DXT1` and `DXT5` correctly (W4, Amrit), and stored-flag `YCG6` and `YG10` packets laid out
+as above correctly (W5: thumbnails identical to the compressed controls, and Amrit's playback check).
+(Test vectors: `synthetic-dxv3_dxt1-rawflag_pat64`, `synthetic-dxv3_dxt5-rawflag_pat64`; the HQ forms
+are in the W5 Arena set, `docs/handoffs/dxvkit_2026-10-08_w5-close-open-results.md`.)
 
 ---
 
@@ -200,17 +243,34 @@ A legacy packet begins with one u32 (little-endian), the **type word**:
 | 30 (0x40 in the top byte) | texture is DXT5 |
 | 31 (0x80 in the top byte) | payload is stored (uncompressed); clear = LZF |
 
-So the top byte (bits 24..31) is the "type byte". Texture selection, in this order:
+So the top byte (bits 24..31) is the "type byte". Texture selection:
 1. type byte bit 0x40 set: DXT5 (BC3 stream);
-2. else type byte bit 0x20 set, or version nibble = 2: DXT1 (BC1 stream);
-3. else: reject.
+2. otherwise: DXT1 (BC1 stream), whatever bit 0x20 and the version nibble say.
+
+The version nibble and bit 28 do not affect decoding.
 
 **Measured:** the only legacy clip found (1920 x 1080, 201 frames) uses type byte 0x23 (DXT1, LZF,
-version nibble 3) in every packet. Type bytes with 0x40 or 0x80, and the "version nibble 2 without a
-texture bit" rule, are **unobserved**; the test vectors include synthetic examples of each.
+version nibble 3) in every packet. All other type bytes are **unobserved** in real files.
 
-A decoder MUST reject: packet shorter than 4 bytes; payload length + 4 > packet size; no texture
-selected (rule 3).
+**Arena 7.28 behaviour** (W5; 256 x 256 legacy packets built from DXVKit-encoded block streams, LZF or
+stored; Arena shows "DXV v.m" with v = version nibble - 1 for nibbles up to 3 and 2 above, m = 2 when bit
+0x20 is set, 0 otherwise; the label has no effect on decoding). Every form below loads and plays correctly:
+
+| Type byte | Payload | Arena 7.28 |
+|---|---|---|
+| 0x23 (control, the real form) | LZF DXT1 | plays ("DXV 2.2") |
+| 0x43 | LZF DXT5 | plays, with alpha ("DXV 2.0") |
+| 0xA3, 0xC3 | stored DXT1, stored DXT5 | play |
+| 0x02 (nibble 2, no texture bit) | LZF DXT1 | plays as DXT1 ("DXV 1.0") |
+| 0x21, 0x22, 0x24, 0x20 (nibbles 1, 2, 4, 0) | LZF DXT1 | play |
+| 0x63 (both texture bits) | LZF DXT5 | plays as DXT5 |
+| 0x03 (nibble 3, no texture bit) | LZF DXT1 | plays as DXT1 ("DXV 2.0", "No Alpha") |
+
+The W1 rule ("no texture bit and nibble other than 2: reject") is therefore withdrawn: Arena never
+rejects a legacy packet for its type byte. A decoder MUST select the texture as above and MUST reject
+only: packet shorter than 4 bytes; payload length + 4 > packet size; and the payload errors of 4.2.
+(The invalid vector `bad_dxdi-no-texture-flag`, type byte 0x03 with DXT1 data, now contradicts this rule;
+it is listed as a finding for the next clean-room wave and left unchanged until then.)
 
 ### 4.2 Payload
 
@@ -615,6 +675,30 @@ Resolume streams use the three-colour mode (colour 0 <= colour 1) but never inde
 checked from Alley, AME and two real clips: 38,115 three-colour blocks, none using index 3). A decoder that uploads to a GPU SHOULD use an opaque BC1
 format.
 
+Other readers' conventions (W5; all within the +-1 tolerance above, none changes the block streams):
+
+- **FFmpeg 8.1.1** (its source read in the dirty room, then checked against its output): the palette
+  rule and the integer interpolation are the reference ones above, but the 5 / 6-bit expansion is not
+  bit replication. It is a rounded division by 31 (by 63) computed in integers: for a 5-bit value v,
+  t = 255 v + 16 and the result is (t + t / 32) / 32; for a 6-bit value, t = 255 v + 32 and the result
+  is (t + t / 64) / 64 (all divisions truncating). It differs from bit replication by exactly 1 at these
+  values only:
+
+  | Bits | Values v where FFmpeg gives bit replication - 1 | Values v where FFmpeg gives bit replication + 1 |
+  |---|---|---|
+  | 5 | 20, 24, 25, 28, 29 | 3, 7 |
+  | 6 | 48 .. 53 | 11 .. 15 |
+
+  With this expansion FFmpeg's RGBA output is reproduced exactly (0 bytes differ) on frame 0 of the Alley
+  `DXT1` and `DXT5` vectors and of DXVKit's 1080p `DXT1` / `DXT5` encodes (8,294,400 bytes each); the
+  reference convention differs from it in 0.589 % of bytes (DXVKit `DXT1`) to 8.1 % (Alley `DXT1`),
+  never by more than 1 before alpha processing (`DXT5`: up to 2 after FFmpeg's un-premultiplication,
+  8.5).
+- **Resolume Arena 7.28** (GPU upload; composition output captured pixel-exact over Syphon, W5): bit
+  replication with the interpolated colours computed without truncation and rounded to nearest at
+  output. It matches that model in all but 0.19 % of bytes (at most 2 off, the GPU's own BC1 arithmetic),
+  and the reference convention in 94.5 % (at most 2 off).
+
 ### 8.2 BC3 (DXT5)
 
 Bytes 0..7: alpha 0, alpha 1, 48 bits of 3-bit indices (pixel (x, y) at bits 3 x (4y + x) of bytes 2..7
@@ -622,10 +706,16 @@ read as a little-endian 48-bit number). If alpha 0 > alpha 1: palette = a0, a1, 
 ((7 - i) a0 + i a1) / 7 for i = 1..6; else a0, a1, ((5 - i) a0 + i a1) / 5 for i = 1..4, then 0, 255.
 Bytes 8..15: a BC1 colour block that always uses the four-colour palette.
 
-**Colour endpoint order.** Readers disagree on a BC3 colour half whose colour 0 <= colour 1: this spec,
-the BC3 definition and GPUs use the four-colour palette, but some CPU decoders apply the BC1 three-colour
-rule (black box: FFmpeg 8.1.1 does, `docs/cleanroom/QUESTIONS.md` item 10). The two readings differ for
-colour 0 < colour 1 in indices 2 and 3, and for colour 0 = colour 1 in index 3 only.
+**Colour endpoint order.** A BC3 colour half whose colour 0 <= colour 1 is read with the four-colour
+palette by this spec, the BC3 definition, GPUs and FFmpeg 8.1.1. Some CPU decoders written for BC1 apply
+the BC1 three-colour rule to it instead; the two readings differ for colour 0 < colour 1 in indices 2
+and 3, and for colour 0 = colour 1 in index 3 only. (Correction, W5: the W4 text said FFmpeg applies the
+three-colour rule, from the W3 black-box observation in `docs/cleanroom/QUESTIONS.md` item 10. FFmpeg's
+source always uses the four-colour palette for its DXV `DXT5` path, and a black-box check confirms it: a
+256 x 256 stored-flag `DXT5` packet with opaque alpha and 744 of its 4,096 colour halves swapped to
+colour 0 < colour 1 decodes in FFmpeg exactly like the four-colour palette (0 bytes differ) and unlike
+the three-colour rule (6,173 bytes differ). The W3 differences were most likely its un-premultiplication
+(8.5) magnifying small colour differences at low alpha.)
 
 - A writer MUST make every BC3 colour half read the same either way: colour 0 > colour 1 (as unsigned
   u16), or colour 0 = colour 1 with no pixel using index 3.
@@ -649,20 +739,57 @@ other 41 GlEnc- and FFmpeg-labelled `DXT5` files have none.
 
 ### 8.4 YCoCg to RGB (YCG6, YG10)
 
-Per pixel (x, y) of the display area: Y = luma sample (x, y); Co, Cg = chroma samples at (x / 2, y / 2)
-(integer division) in the reference outputs (nearest neighbour; a player MAY filter the chroma instead,
-which changes the result slightly). With co = Co - 128 and cg = Cg - 128:
+Per pixel (x, y) of the display area: Y = luma sample (x, y); Co, Cg = the chroma samples at (x / 2,
+y / 2) (integer division: **nearest neighbour**, every chroma sample covers one aligned 2 x 2 pixel
+quad). With co = Co - 127.5 and cg = Cg - 127.5 (the chroma midpoint is 127.5, i.e. 0.5 in normalised
+texture units, not 128):
 
 - t = Y - cg
 - R = t + co
 - G = Y + cg
 - B = t - co
 
-each clamped to 0..255. Alpha = A (YG10) or 255 (YCG6).
+then out-of-gamut values are folded (below) and each channel is rounded to nearest and clamped to
+0..255. Alpha = A (YG10) or 255 (YCG6).
 
 This is the plain YCoCg inverse (no halving of the chroma terms; the lifting "YCoCg-R" inverse gives
-visibly desaturated pictures). It was confirmed visually against Resolume-rendered output by an earlier
-project; the reference RGBA uses it.
+visibly desaturated pictures).
+
+**Arena 7.28 behaviour** (W5, the authority for Resolume playback). A 1920 x 1080 `YCG6` file with hard
+chroma steps at odd and even columns and rows, 1-pixel colour grids and chroma checkerboards at 1- and
+2-pixel pitch (DXVKit's encoder, our own pattern) was played alone in an Arena composition of the same
+size, layer opacity 1, no effects, and the composition output was captured over Syphon (a `DXT1` encode
+of the same picture, captured the same way, came back geometrically exact and within 2 of a GPU BC1
+decode, 8.1). Comparison with candidate reconstructions computed from the decoded BC4 blocks
+(1,555,200 colour bytes, a quarter of the frame on a regular lattice):
+
+| Reconstruction | Bytes exact | Within 1 | Within 2 | Max | Mean |
+|---|---|---|---|---|---|
+| nearest chroma, midpoint 127.5, out-of-gamut folding (below) | 81.10 % | 97.24 % | 98.56 % | 11 | 0.25 |
+| nearest chroma, midpoint 127.5, plain clamping | 80.69 % | 96.27 % | 97.42 % | 54 | 0.49 |
+| nearest chroma, midpoint 128, integer BC4 palette (the reference RGBA in `test_vectors/`) | 32.63 % | 85.80 % | 96.07 % | 54 | 1.10 |
+| bilinear chroma, sited at the 2 x 2 quad centres, midpoint 127.5 | 38.74 % | 42.51 % | 43.51 % | 124 | 14.67 |
+
+Bilinear chroma with co-sited (top-left) or half-texel-shifted placement fits worse still (mean 13.6 to
+15.3). In the vertical-stripe area (row 100, columns 40 to 71, checked one by one) the chroma Arena
+uses at each in-gamut pixel equals the chroma sample of its own 2 x 2 quad, with no weight on the
+neighbouring sample. With midpoint 128 the green channel matches in 14 %
+of in-gamut bytes; with 127.5, in 93 %. A `YG10` file whose Y and chroma blocks are identical to the
+`YCG6` file's (alpha 255) gives a byte-identical Arena output: both variants are reconstructed the same
+way.
+
+**Out-of-gamut folding.** Where R or B leaves 0..255, Arena does not clamp the channels independently:
+the overflow of one of R and B is carried into the other. A model that reproduces Arena (max 11 off in
+the table above, against 54 for independent clamping): if R < 0, add R to B and set R to 0; if B < 0, add
+B to R and set B to 0; if R > 255, add R - 255 to B and set R to 255; if B > 255, add B - 255 to R and set
+B to 255; G is unchanged. The exact form Arena uses was not determined further; the remaining
+differences (at most 2 for 98.6 % of bytes) are GPU arithmetic.
+
+Rules: a player that wants to look like Resolume SHOULD use nearest chroma and the 127.5 midpoint, and
+SHOULD fold out-of-gamut values as above. The reference RGBA outputs in `test_vectors/` were produced
+in W1 with midpoint 128, integer BC4 palettes and plain clamping; they stay as they are (the block
+streams are the normative output, the RGBA a convenience) and differ from Arena's convention by up to 1
+in most bytes and more in saturated colours.
 
 ### 8.5 Alpha meaning
 
@@ -711,8 +838,9 @@ A conforming decoder MUST reject the packet (and SHOULD keep showing the previou
 | Where | Condition |
 |---|---|
 | any | packet shorter than its header (12 bytes DXV3, 4 bytes legacy) |
-| DXV3 header | unknown texture tag; payload length + 12 > packet size |
-| legacy header | payload length + 4 > packet size; no texture selected (4.1) |
+| container | sample-entry FourCC other than `DXD3`, `DXDI`, `DXD4` (2.2; the whole file) |
+| DXV3 header | unknown texture tag; payload length + 12 > packet size; version byte below 4; stored flag other than 0 or 1 (3.2) |
+| legacy header | payload length + 4 > packet size (no type byte is rejected, 4.1) |
 | legacy LZF | input runs out inside an operation; back-reference before the output start; output length differs from the coded texture's |
 | stored payload | shorter than the coded texture needs |
 | DXT1 / DXT5 | payload ends before the texture is complete; a copy distance larger than the current block index |
@@ -729,20 +857,31 @@ CW x CH bytes (YG10, with alpha); HQ chroma CW x CH / 4 bytes.
 
 ---
 
-## 10. Open questions (unobserved or undetermined)
+## 10. Former open questions (all closed)
 
-1. Legacy (`DXDI`) DXT5 (type bit 0x40), stored legacy payloads (0x80), version nibbles other than 3, and
-   the "nibble 2 means DXT1" rule: never seen in a real file. Test vectors are synthetic.
-2. DXV3 stored flag = 1: never seen in a file found (397,117 DXV3 packets). The meaning is clear for DXT1 /
-   DXT5, and Resolume Arena 7.28 plays such packets (W4, Amrit: DXVKit's stored-flag DXT1 and DXT5 test
-   files play correctly); undefined for YCG6 / YG10.
-3. DXV3 version / minor / reserved bytes other than 4 / 0 / 0: never seen.
-4. Sample-entry FourCCs other than `DXD3` / `DXDI`: never seen.
-5. Straight versus premultiplied alpha (8.5): files of both kinds exist and nothing in the file says which.
-   W4 recorded which writer does what and how readers treat them (Arena: per-clip "Alpha Type", default
-   Premultiplied). Closed as far as the format goes: the file cannot say.
-6. Chroma siting / filtering in Resolume's own HQ playback (the reference uses nearest neighbour).
-7. Resolume's forward YCoCg transform and its BC encoders (an encoder choice; see ENCODING_NOTES.md).
+Nothing in this specification is open. Each item names its authority and evidence.
+
+1. Closed (W5, Arena 7.28 behaviour, 4.1): legacy (`DXDI`) DXT5 (0x40), stored legacy payloads (0x80),
+   every version nibble tried (0, 1, 2, 3, 4) and the type bytes without a texture bit (0x02, 0x03) all
+   play in Arena; bit 0x40 selects DXT5, everything else DXT1, and no type byte is rejected. Real files
+   of these forms still do not exist; the rule is Arena's.
+2. Closed (W4 + W5, Arena 7.28 behaviour, 3.3): stored flag 1 plays for all four DXV3 variants; the
+   `YCG6` / `YG10` stored layout is the plane streams back to back (Y or Y+A, then chroma). Stored flag
+   values other than 0 and 1 play black in Arena: invalid.
+3. Closed (W5, Arena 7.28 behaviour, 3.2): version byte 5 and 6 play, 3 and 0 play black (so: below 4
+   invalid, 4 and above accepted); minor 1 and reserved 1 play.
+4. Closed (W5, Arena 7.28 behaviour, 2.2): `DXD3`, `DXDI` and `DXD4` load; `DXV3`, `DXT1`, `YCG6`, `DXD1`,
+   `DXDA` do not; the packet, not the FourCC, decides between legacy and DXV3.
+5. Closed as far as the format goes (W4, 8.5): straight versus premultiplied alpha cannot be read from
+   the file, because no field in the packet, the sample description or the QuickTime atoms carries it
+   and files of both kinds exist (360 alpha files measured). Readers let the user choose (Arena: per-clip
+   "Alpha Type", default Premultiplied).
+6. Closed (W5, Arena's composition output captured pixel-exact, 8.4): Arena uses nearest-neighbour
+   chroma, one sample per aligned 2 x 2 quad, chroma midpoint 127.5, and folds out-of-gamut R / B
+   overflow into the other channel.
+7. Closed (W5, Alley 7.28 exports of a known lossless source, ENCODING_NOTES.md 5): Resolume's forward
+   transform is the exact YCoCg transform with chroma midpoint 127.5, unrounded before the BC4 encoder,
+   with 2 x 2 box-averaged chroma.
 8. Closed (W4): an entropy-coded opcode stream with a single symbol cannot be written (7.3.1); Resolume
    writes tiny streams with the stored coding and never uses fill (7.3).
 9. Closed (W4): opcode-stream selector 3 decodes like 2 (7.3.4).

@@ -184,3 +184,47 @@ vector, its reference outputs copied from that vector), `vectors.tsv`, `MANIFEST
 `test_vectors/README.md`. Scratch scripts (a QuickTime sample reader, an HQ probe written from spec
 section 7, statistics scripts, the selector patcher) stayed in the session's scratch folder and are not
 committed. Nothing in `src/`, `include/`, `swift/`, `tools/` was changed.
+
+## Phase A addendum (W5, the dirty room: close the open spec items)
+
+- Session: Claude Code (Claude Opus 5.5), session `18dfdfdd-8b9e-408a-98d9-8a2fbe0f801d`, on Amrit's
+  Mac, working directory `~/Documents/claude/DXVKit`. Fresh session after /clear.
+- Date: 2026-10-08, roughly 16:15-17:30 UTC.
+- Brief: `docs/handoffs/dxvkit_2026-10-08_w5-close-open-brief.md`. The brief allowed this session to read
+  FFmpeg source.
+
+### Read
+
+| What | Why |
+|---|---|
+| `CLAUDE.md`, Amrit's global `~/.claude/CLAUDE.md`, the W5 brief, the W4 r4 handoff | rules, starting point |
+| `docs/spec/*`, `docs/cleanroom/*`, `test_vectors/README.md` | the documents being revised |
+| FFmpeg 8.1.1 `libavcodec/texturedsp.c` (fetched from the FFmpeg GitHub tag `n8.1.1` into the session scratch folder; the file carries an MIT-style licence), lines 1-420: the BC1 colour expansion and palette, the BC2 / BC3 block routines, the premultiplied-to-straight conversion | Q13 |
+| FFmpeg `libavcodec/dxv.c` (the copy in `~/Downloads`, LGPL): only a `grep` of the lines that choose the texture routine and output pixel format (about 15 lines) | which routine FFmpeg uses for `DXT1` / `DXT5` |
+
+Attempted and refused by the Claude Code permission layer, not worked around: fetching `dxv.c` and
+`texturedsp_template.c` from GitHub, a bulk read of the local `dxv.c` (lines 850-1000), and a search for
+LoadEhr / Glance source files. **No Glance, GlEnc, CueGlance, MaCrate or LoadEhr source was read.**
+No upstream identifier, structure or line reference went into `docs/spec/` (self-check in the W5 results
+handoff); FFmpeg's expansion is given there as a formula in words and a table of values.
+
+### Black-box use
+
+- FFmpeg 8.1.1 (Homebrew binary): RGBA output of `DXT1` / `DXT5` frames (Q13), framemd5 of the W5 forms,
+  one stored `DXT5` packet with swapped colour endpoints.
+- Resolume Arena 7.28 via its MCP server: created layer 8 "DXVKit W5 Forms", grew the composition to 36
+  columns, loaded 36 clips (never triggered; Amrit fired them), read clip info, thumbnails, the Arena
+  log, the monitor (`inspect`, found lossy, not used for results). Arena's Syphon output (switched on by
+  Amrit, server "Arena - Composition") captured with a 60-line Objective-C client in the scratch folder
+  linked against the installed Syphon framework (BSD, `/Library/Application Support/Resolume/Frameworks`;
+  not committed). Composition not saved.
+- Resolume Alley 7.28: Amrit exported our lossless probe source (YCG6 and YG10).
+- DXVKit's `dxvtool` (build/): `encode`, `dump-blocks`, `dump-rgba`, `check`, `info`, `verify`.
+
+### Wrote
+
+Prose and tables in `docs/spec/DXV_FORMAT.md` (2.2, 3.1-3.3, 4.1, 8.1, 8.2, 8.4, 9, 10),
+`docs/spec/ENCODING_NOTES.md` (1, 2, 5), `docs/cleanroom/QUESTIONS.md` (W5 section, findings F1-F7,
+status cells), `test_vectors/README.md` (a note), this entry. Scratch scripts (QuickTime reader /
+writer, LZF packer, form builder, pattern generators, model fits, the Syphon client) stayed in the
+session scratch folder. Nothing in `src/`, `include/`, `swift/`, `tools/` was changed. No new vectors.

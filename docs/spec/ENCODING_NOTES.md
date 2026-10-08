@@ -6,11 +6,13 @@ Resolume's own encoders (Alley, and the codec inside Adobe Media Encoder) write,
 described in `docs/cleanroom/INVENTORY.md`.
 
 Revised in W4 (2026-10-08, Phase A): BC3 endpoint order, alpha convention, the extra Y opcode, selector 3
-and the single-symbol rule (4, 7.1, 7.3).
+and the single-symbol rule (4, 7.1, 7.3). Revised in W5 (2026-10-08, Phase A): FourCCs and header bytes
+Arena accepts (1, 2), Resolume's forward YCoCg transform and chroma filter (5).
 
 ## 1. Container
 
-- One QuickTime video track; sample-entry FourCC `DXD3` for all four DXV3 variants. Use the field values
+- One QuickTime video track; sample-entry FourCC `DXD3` for all four DXV3 variants (Arena 7.28 also
+  accepts `DXDI` and `DXD4`, but no other, W5: DXV_FORMAT.md 2.2). Use the field values
   of DXV_FORMAT.md 2.2 (vendor `FFMP`, quality 512, 72 dpi, depth 24, empty compressor name, entry size
   86). These are what Resolume writes; matching them avoids any host that sniffs fields.
 - Width / height in the sample entry and track header = the display size, not the padded size.
@@ -21,11 +23,14 @@ and the single-symbol rule (4, 7.1, 7.3).
 ## 2. Packet header (DXV3)
 
 - Bytes 0..3 = the tag reversed (`1TXD`, `5TXD`, `6GCY`, `01GY`).
-- Byte 4 = 4, byte 5 = 0, byte 7 = 0 (observed in every packet).
+- Byte 4 = 4, byte 5 = 0, byte 7 = 0 (observed in every packet). Arena 7.28 shows black for a version
+  byte below 4 (W5).
 - Byte 6 (stored flag) = 0 normally. A stored packet (flag 1, payload = the raw block stream) is legal for
   DXT1 / DXT5 per the format, but no Resolume encoder was seen writing one. Resolume Arena 7.28 plays
   them (Amrit, W4: DXVKit's 333 x 221 stored-flag DXT1 and DXT5 test files play correctly). Prefer the
-  compressed form; stored is a valid fallback, e.g. when compression would be larger. Not for YCG6 / YG10.
+  compressed form; stored is a valid fallback, e.g. when compression would be larger. For YCG6 / YG10 the
+  stored payload is the plane streams back to back (DXV_FORMAT.md 3.3); Arena 7.28 plays it (W5), but it
+  is several times larger than the HQ coding. Write the flag as exactly 1: Arena shows black for 2.
 - Bytes 8..11 = the exact payload length; the sample size = 12 + payload length (observed, always).
 
 ## 3. Texture size
@@ -55,11 +60,36 @@ and the single-symbol rule (4, 7.1, 7.3).
 ## 5. YCoCg (HQ variants)
 
 - The decoder inverse is fixed (DXV_FORMAT.md 8.4): R = Y - cg + co, G = Y + cg, B = Y - cg - co with
-  co = Co - 128, cg = Cg - 128. The matching forward transform is Y = R/4 + G/2 + B/4,
-  Co = R/2 - B/2 + 128, Cg = -R/4 + G/2 - B/4 + 128. Rounding is the encoder's choice; keep Co and Cg
-  inside 0..255 (Co = 128 + (R - B)/2 can reach 255.5 for pure red: round down or clamp).
-- Chroma is subsampled 2 x 2 (one Co / Cg sample per 2 x 2 luma pixels, covering the padded size).
-  Averaging the four pixels is a sensible choice; Resolume's exact filter is unknown.
+  co = Co - 127.5, cg = Cg - 127.5 (chroma midpoint 127.5, i.e. 0.5 in normalised texture units; that is
+  what Arena 7.28 uses when it plays the file, W5). The matching forward transform is Y = R/4 + G/2 + B/4,
+  Co = R/2 - B/2 + 127.5, Cg = -R/4 + G/2 - B/4 + 127.5. With the 127.5 midpoint Co and Cg span exactly
+  0..255 (pure blue and pure red give Co = 0 and 255, magenta and green give Cg = 0 and 255): no clamping.
+- **What Alley 7.28 does (W5, measured).** A lossless 1920 x 1080 source of our own (120 flat 64 x 64
+  colour patches: the eight RGB cube corners, greys, 87 fixed random colours; per-channel ramps; chroma
+  checkerboards at 1, 2, 4 and 8 pixel pitch; an alpha ramp) was exported by Amrit through Alley 7.28 with
+  the presets "High Quality No Alpha" (`YCG6`) and "High Quality With Alpha" (`YG10`). Decoding Alley's
+  BC4 blocks with the exact (unrounded) palette and comparing with the source:
+  - Alley computes the transform above **exactly, without rounding**, and hands the fractional values to
+    its BC4 encoder. On the 120 flat patches the decoded values differ from the exact targets by at most
+    0.071 (Y), 0.214 (Co) and 0.464 (Cg), mean 0.125 (Co) and 0.186 (Cg); with midpoint 128 the chroma
+    errors are 0.500 / 0.750 at most and three times larger on average. A flat patch whose target is
+    fractional is written with two adjacent endpoints and the palette entry nearest to the target, e.g.
+    Y = 63.75 as endpoints 64 / 63 and the entry 63.714, grey chroma 127.5 as endpoints 128 / 127 and the
+    entry 127.714 (in 8-entry mode). Read with truncating integer interpolation those entries drop by
+    one, which is why integer formulas match Alley's Y exactly with floor((R + 2G + B) / 4) but no integer
+    formula matches every Cg.
+  - **Chroma subsampling: a 2 x 2 box average**, sited at the centre of each aligned 2 x 2 pixel quad.
+    Mean absolute error against the source on the checkerboard area: box 0.33; top-left sample 11.9;
+    4 x 4 tent 16.7; co-sited 3 x 3 (1, 2, 1) 16.9. On the vertical ramps: box 0.217, next best 0.221.
+  - The `YCG6` and `YG10` exports have the same Y and chroma on these patches; alpha 255 stays 255.
+- For DXVKit's encoder (a finding for the clean room, not a format rule): it currently writes the
+  chroma with midpoint 128 (the W1 text of this section said so). Played in Arena, which reads 127.5,
+  that shifts green up by half a level and blue down by one level (measured over Syphon: an area that
+  DXVKit encoded as Y = Co = Cg = 128, i.e. grey 128, comes back from Arena as 128, 129, 127). Writing the 127.5 midpoint, unrounded targets into the BC4 encoder and the 2 x 2 box
+  average matches Alley and Arena.
+- BC4 endpoint choices: any encoder works; Alley's choices matter only in that it targets fractional
+  values (above). W3 measured size and quality parity between Alley and DXVKit's encoder (QUESTIONS 21,
+  22).
 
 ## 6. The block-copy layers (DXT1, DXT5)
 
