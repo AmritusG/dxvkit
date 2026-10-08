@@ -686,7 +686,7 @@ fewer than 500 semi-transparent sample pixels (329 files) cannot be classified):
 | Resolume clips shipped in Resolume Wire's documentation | `DXT5` | straight | 7 files: 8.6 to 9.2 % (premultiplied colour could not reach this) |
 | GlEnc | `DXT5`, `YG10` | either, by version and variant | v0.5.0-candidate: `DXT5` straight (98.4 %), `YG10` premultiplied-looking (0.0 %) from the same source; older test files: 7 `DXT5` + 1 `YG10` premultiplied-looking |
 | FFmpeg's encoder | `DXT1` only | (no alpha) | |
-| DXVKit's encoder | all | what the caller passes (default straight); a flag records the caller's convention but nothing is written to the file | `docs/design-encoder.md` |
+| DXVKit's encoder | all | what the caller passes (default straight, like Alley: Amrit's decision, W4, because DXVKit's users are Glance, CueGlance, MaCrate and GlEnc rather than Arena); a flag records the caller's convention but nothing is written to the file | `docs/design-encoder.md` |
 
 **Readers:**
 
