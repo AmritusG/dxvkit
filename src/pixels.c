@@ -1,8 +1,9 @@
 /*
  * DXVKit: block streams to RGBA8 (CPU path).
  *
- * BC1 / BC3 / BC4 per the public S3TC / RGTC definitions with the integer conventions of
- * docs/spec/DXV_FORMAT.md section 8; YCoCg inverse per section 8.4.
+ * BC1 / BC3 per the public S3TC definitions with the integer conventions of docs/spec/DXV_FORMAT.md
+ * 8.1 / 8.2; YCG6 / YG10 per section 8.4 (exact BC4 palettes, chroma midpoint 127.5, out-of-gamut
+ * folding: what Resolume Arena 7.28 shows).
  *
  * MIT License. Copyright (c) 2026 Amrit Rosell. See LICENSE.
  */
@@ -58,7 +59,27 @@ static void bc4_block(const uint8_t *blk, uint8_t out[16])
         out[i] = pal[idx & 7u];
 }
 
-DXVK_INLINE uint8_t clamp255(int v) { return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v); }
+/* 16 values of a BC4 block with the exact (untruncated) palette, in units of 1/35: eight-value entries
+ * are sevenths, six-value entries fifths, so every palette value is a whole number of 35ths. */
+static void bc4_block_exact(const uint8_t *blk, uint16_t out[16])
+{
+    uint32_t a0 = blk[0], a1 = blk[1];
+    uint64_t idx = (uint64_t)dxvk_le24(blk + 2) | ((uint64_t)dxvk_le24(blk + 5) << 24);
+    uint16_t pal[8];
+    pal[0] = (uint16_t)(a0 * 35u);
+    pal[1] = (uint16_t)(a1 * 35u);
+    if (a0 > a1) {
+        for (uint32_t i = 1; i <= 6; i++)
+            pal[1 + i] = (uint16_t)(((7u - i) * a0 + i * a1) * 5u);
+    } else {
+        for (uint32_t i = 1; i <= 4; i++)
+            pal[1 + i] = (uint16_t)(((5u - i) * a0 + i * a1) * 7u);
+        pal[6] = 0;
+        pal[7] = 255u * 35u;
+    }
+    for (int i = 0; i < 16; i++, idx >>= 3)
+        out[i] = pal[idx & 7u];
+}
 
 DXVK_INLINE uint8_t premul(uint32_t c, uint32_t a) { return (uint8_t)((c * a + 127u) / 255u); }
 
@@ -111,20 +132,58 @@ static void rows_bc(const rgba_job *j, uint32_t row_begin, uint32_t row_end)
     }
 }
 
+/* Fixed point for the HQ path: units of 1/70 (the 1/35 palette values doubled, so that the chroma
+ * midpoint 127.5 is a whole number). */
+#define HQ_ONE 70
+#define HQ_MAX (255 * HQ_ONE)
+#define HQ_MID (255 * HQ_ONE / 2) /* 127.5 */
+
+/* round to nearest (halves up) and clamp: units of 1/70 -> 0..255 */
+DXVK_INLINE uint8_t hq_round(int v)
+{
+    return (uint8_t)(v <= 0 ? 0 : v >= HQ_MAX ? 255 : (v + HQ_ONE / 2) / HQ_ONE);
+}
+
+/* YCoCg -> RGB with Resolume Arena's convention (spec 8.4): chroma midpoint 127.5, out-of-gamut R / B
+ * overflow carried into the other channel, then rounding. Y, co, cg in units of 1/70. */
+DXVK_INLINE void hq_rgb(int y, int co, int cg, uint8_t *dst)
+{
+    int t = y - cg, r = t + co, g = y + cg, b = t - co;
+    if (r < 0) {
+        b += r;
+        r = 0;
+    }
+    if (b < 0) {
+        r += b;
+        b = 0;
+    }
+    if (r > HQ_MAX) {
+        b += r - HQ_MAX;
+        r = HQ_MAX;
+    }
+    if (b > HQ_MAX) {
+        r += b - HQ_MAX;
+        b = HQ_MAX;
+    }
+    dst[0] = hq_round(r);
+    dst[1] = hq_round(g);
+    dst[2] = hq_round(b);
+}
+
 static void rows_hq(const rgba_job *j, uint32_t row_begin, uint32_t row_end)
 {
     const dxvk_frame_layout *l = j->layout;
     int ya = l->format[0] == DXVK_BLOCKS_BC5;
     size_t y_bytes = ya ? 16u : 8u;
-    uint8_t co[16], cg[16], yv[16], av[16];
+    uint16_t co[16], cg[16], yv[16], av[16];
 
     for (uint32_t cy = row_begin; cy < row_end; cy++) {
         for (uint32_t cx = 0; cx < l->blocks_x[1]; cx++) {
             const uint8_t *cblk = j->plane[1] + ((size_t)cy * l->blocks_x[1] + cx) * 16u;
             if (cx * 8u >= l->display_width)
                 break;
-            bc4_block(cblk, co);
-            bc4_block(cblk + 8, cg);
+            bc4_block_exact(cblk, co);
+            bc4_block_exact(cblk + 8, cg);
             for (uint32_t sub = 0; sub < 4; sub++) {
                 uint32_t bx = cx * 2u + (sub & 1u), by = cy * 2u + (sub >> 1);
                 uint32_t x0 = bx * 4u, y0 = by * 4u, cols, rows;
@@ -138,28 +197,22 @@ static void rows_hq(const rgba_job *j, uint32_t row_begin, uint32_t row_end)
                 if (rows > 4u)
                     rows = 4u;
                 yblk = j->plane[0] + ((size_t)by * l->blocks_x[0] + bx) * y_bytes;
-                bc4_block(yblk, yv);
+                bc4_block_exact(yblk, yv);
                 if (ya)
-                    bc4_block(yblk + 8, av);
+                    bc4_block_exact(yblk + 8, av);
                 for (uint32_t y = 0; y < rows; y++) {
                     uint8_t *dst = j->rgba + (size_t)(y0 + y) * j->stride + (size_t)x0 * 4u;
-                    /* chroma sample of pixel (x0 + x, y0 + y) inside this chroma block */
+                    /* chroma sample of pixel (x0 + x, y0 + y) inside this chroma block: nearest */
                     uint32_t crow = ((by & 1u) * 4u + y) / 2u;
                     for (uint32_t x = 0; x < cols; x++, dst += 4) {
                         uint32_t ci = crow * 4u + ((bx & 1u) * 4u + x) / 2u;
-                        int Y = yv[y * 4u + x];
-                        int o = (int)co[ci] - 128, g = (int)cg[ci] - 128;
-                        int t = Y - g;
-                        uint8_t a = ya ? av[y * 4u + x] : 255;
-                        uint8_t r = clamp255(t + o), gg = clamp255(Y + g), b = clamp255(t - o);
+                        uint8_t a = ya ? hq_round(2 * av[y * 4u + x]) : 255;
+                        hq_rgb(2 * yv[y * 4u + x], 2 * co[ci] - HQ_MID, 2 * cg[ci] - HQ_MID, dst);
                         if (j->premultiply && ya) {
-                            r = premul(r, a);
-                            gg = premul(gg, a);
-                            b = premul(b, a);
+                            dst[0] = premul(dst[0], a);
+                            dst[1] = premul(dst[1], a);
+                            dst[2] = premul(dst[2], a);
                         }
-                        dst[0] = r;
-                        dst[1] = gg;
-                        dst[2] = b;
                         dst[3] = a;
                     }
                 }

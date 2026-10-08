@@ -4,9 +4,11 @@ A clean-room, MIT-licensed decoder and encoder for Resolume's DXV video codec: l
 LZF and stored; decode only), DXV3 DXT1, DXT5, YCG6 "High Quality" and YG10 "High Quality With Alpha",
 including the FSE-coded opcode streams Resolume writes.
 
-Status: **decoder (W2) and encoder (W3) complete.** C99 core (libc only), header-only C++ wrapper,
-SwiftPM package, `dxvtool`. Decoder: every test vector matches byte for byte (127/127 block streams,
-91/91 RGBA, 11/11 invalid packets rejected). Encoder: RGBA8 or caller block planes -> DXV3 packets for
+Status: **1.0.0** (tag `v1.0.0`, `CHANGELOG.md`): decoder (W2), encoder (W3), Resolume Arena 7.28's
+acceptance and colour rules (W6). C99 core (libc only), header-only C++ wrapper, SwiftPM package,
+`dxvtool`. Decoder: every test vector matches byte for byte (366/366 block streams, 287/287 RGBA, 47/47
+invalid packets rejected), and DXVKit's verdict equals Arena's on all 33 Arena forms
+(`dxvtool arena test_vectors/arena_forms.tsv`). Encoder: RGBA8 or caller block planes -> DXV3 packets for
 all four variants, two effort levels, a QuickTime writer; every encoded packet decodes back to exactly
 the packed block streams. Written from the specification alone; see `CLAUDE.md` for the clean-room
 rules and `docs/cleanroom/` for provenance.
@@ -34,7 +36,14 @@ Output planes (whole coded texture = display size rounded up to 16 on both axes,
 | YCG6 | BC4: Y | BC5 layout, half size: Co, Cg |
 | YG10 | BC5 layout: Y, alpha | BC5 layout, half size: Co, Cg |
 
-YCoCg to RGB: R = Y - cg + co, G = Y + cg, B = Y - cg - co with co = Co - 128, cg = Cg - 128.
+Accepted: sample-entry FourCCs `DXD3`, `DXDI`, `DXD4`; the packet decides legacy versus DXV3. Rejected
+like Arena: DXV3 version byte below 4, stored flag other than 0 / 1. Stored-flag packets of every
+variant decode; every legacy type byte decodes (0x40 = DXT5, else DXT1).
+
+YCoCg to RGB (the RGBA path follows Resolume Arena, spec 8.4): exact BC4 palettes, chroma nearest
+(one sample per 2 x 2 quad), co = Co - 127.5, cg = Cg - 127.5, R = Y - cg + co, G = Y + cg,
+B = Y - cg - co, R / B overflow folded into the other channel, rounded at the end. A GPU path that wants
+to match Arena: chroma midpoint 0.5 (127.5 / 255) and nearest (point) chroma sampling.
 Alpha is returned as stored (Alley writes straight colour); `DXVK_OPT_PREMULTIPLY` converts for RGBA.
 No allocation and no threads in the decode path; `dxvk_jobs` lets the caller run the two HQ sections
 and the RGBA bands in parallel.
@@ -55,7 +64,8 @@ dxvk_mov_writer_finish(mw); dxvk_mov_writer_close(mw);
 ```
 
 Effort `FAST` (live / batch) and `BEST` (archive) change the BCn endpoint search and the match /
-opcode search (see `include/dxvkit.h`). Odd sizes are padded to 16 x 16 by edge replication. Input is
+opcode search (see `include/dxvkit.h`). Odd sizes are padded to 16 x 16 by edge replication. HQ input goes
+through the exact YCoCg transform with chroma midpoint 127.5 and 2 x 2 box chroma, like Alley. Input is
 straight alpha by default (`DXVK_ENC_PREMULTIPLIED_INPUT` records premultiplied input; the bytes are
 the same). Design: `docs/design-encoder.md`.
 
@@ -69,10 +79,11 @@ Swift (`Package.swift`, module `DXVKit`): `DXVMovie`, `DXVFrame`, `DXVLayout`, `
 ```sh
 cmake -S . -B build && cmake --build build && (cd build && ctest)   # universal arm64 + x86_64 on macOS
 build/dxvtool verify test_vectors/vectors.tsv
+build/dxvtool arena test_vectors/arena_forms.tsv     # DXVKit vs Resolume Arena 7.28, per file
 swift test
 ```
 
-`dxvtool`: `info`, `dump-blocks`, `dump-rgba`, `dump-samples`, `verify`, `check` (decode every
+`dxvtool`: `info`, `version`, `dump-blocks`, `dump-rgba`, `dump-packet`, `dump-samples`, `verify`, `arena`, `check` (decode every
 packet, report byte consumption), `bench`; encoder side: `encode` (PNG / PAM / PPM files or raw RGBA,
 e.g. `ffmpeg ... -f rawvideo -pix_fmt rgba - | dxvtool encode - out.mov --size 1920x1080 --variant
 ycg6 --effort best`), `bench-encode`, `repack` (re-pack another file's block streams with DXVKit's
@@ -83,6 +94,7 @@ ships libFuzzer (e.g. Homebrew LLVM).
 ## Documents
 
 - Specification: `docs/spec/DXV_FORMAT.md`; encoder notes: `docs/spec/ENCODING_NOTES.md`
+- Changes: `CHANGELOG.md`
 - Design: `docs/design.md` (decoder), `docs/design-encoder.md` (encoder); clean-room questions:
   `docs/cleanroom/QUESTIONS.md`
 - Test vectors: `test_vectors/README.md`; provenance: `docs/cleanroom/PROVENANCE.md`

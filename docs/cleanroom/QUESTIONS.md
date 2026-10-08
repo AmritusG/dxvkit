@@ -99,3 +99,30 @@ For other projects: LoadEhr's projector samples HQ chroma nearest (W3), which ma
 midpoint was not checked in W5 and must be 127.5 to match. Glance's HQ path was not checked in W5;
 the same two points apply (nearest chroma, midpoint 127.5), plus the out-of-gamut folding if pixel
 parity with Arena matters.
+
+## W6 (clean room, Arena rules, 2026-10-08)
+
+The W6 clean-room session implemented findings F1-F7 as Amrit decided them (brief
+`docs/handoffs/dxvkit_2026-10-08_w6-arena-rules-brief.md`), from the spec, the W5 handoff and black-box
+use of Arena 7.28 and the ffmpeg binary only. No upstream source was read (PROVENANCE.md, W6 entry).
+
+| # | Finding | Done in 1.0.0 | Evidence | Status |
+|---|---|---|---|---|
+| F1 | legacy type byte 0x03 | 0x40 -> DXT5, else DXT1; no type byte rejected; `bad_dxdi-no-texture-flag` -> decode vector `synthetic-dxdi_type03-implied-dxt1_pat64` | form 10 plays in both; its blocks = the 0x23 control's | Closed |
+| F2 | DXV3 version byte < 4 | rejected (`DXVK_ERR_BAD_HEADER`) | forms 14, 31 black in both; 13, 22, 30 play in both | Closed |
+| F3 | DXV3 stored flag 2 | rejected (`DXVK_ERR_BAD_HEADER`) | forms 17, 29 black in both | Closed |
+| F4 | stored `YCG6` / `YG10` | decoded, planes back to back | forms 19, 21 play; blocks = controls 18, 20 | Closed |
+| F5 | `DXD4`, cross FourCC / packet | `DXD4` accepted; the packet decides the generation | forms 23, 27, 28 play; 24-26, 32, 33 not loaded in both | Closed |
+| F6 | HQ RGBA convention | exact palettes, nearest, 127.5, folding; references regenerated | vs Arena's Syphon capture: 97.21 % within 1, max 11 (was 85.35 %, 54) | Closed |
+| F7 | encoder chroma midpoint | exact unrounded YCoCg, 127.5, 2 x 2 box | grey 128 -> blocks 128 / 127, entry 127.571 -> 128 / 128 / 128 by the 8.4 model, which reproduces W5's Arena capture of the old encoding (128 / 129 / 127) | Closed (Arena capture of the new file optional, see the W6 handoff) |
+
+Agreement on all 33 forms: `dxvtool arena test_vectors/arena_forms.tsv` -> 33 / 33 (before W6: 24 / 33).
+
+W6-1 (for Phase A, not blocking): with F1-F7 done, three spec sentences describe DXVKit's old state and
+could be reworded by a Phase A session: DXV_FORMAT.md 4.1, last paragraph ("left unchanged until
+then"); 8.4, last paragraph (the reference RGBA "stay as they are": they now use 8.4); ENCODING_NOTES 5,
+the paragraph on DXVKit's encoder (it now writes 127.5). The clean room did not edit the spec.
+
+W6-2 (for Amrit, a choice, not a defect): exact unrounded Y (the decision, like Alley) costs bytes. On the
+fair Alley source (3 frames, 1080p, YCG6), fast: exact Y 132,336 B / 37.90 dB (Arena rule), Y rounded to
+integers (chroma still exact) 126,236 B / 37.82 dB; Alley 132,032 B / 37.81 dB. 1.0.0 ships exact Y.

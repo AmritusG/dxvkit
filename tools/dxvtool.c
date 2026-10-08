@@ -1414,6 +1414,121 @@ done:
     return rc;
 }
 
+/* Writes the raw bytes of one packet (one QuickTime sample) to OUT. */
+static int cmd_dump_packet(int argc, char **argv)
+{
+    dxvk_mov *mov;
+    const dxvk_mov_info *in;
+    uint8_t *p;
+    size_t n;
+    dxvk_status st;
+    int ok;
+    if (argc < 3)
+        return 2;
+    if (!open_or_report(argv[0], &mov))
+        return 1;
+    in = dxvk_mov_get_info(mov);
+    p = (uint8_t *)malloc(in->max_packet_size ? in->max_packet_size : 1u);
+    st = p ? dxvk_mov_read_packet(mov, (uint32_t)strtoul(argv[1], NULL, 10), p, in->max_packet_size, &n)
+           : DXVK_ERR_OUT_OF_MEMORY;
+    ok = st == DXVK_OK && write_file(argv[2], p, n);
+    if (st != DXVK_OK)
+        fprintf(stderr, "%s frame %s: %s\n", argv[0], argv[1], dxvk_status_string(st));
+    else
+        printf("%s: %zu bytes\n", argv[2], n);
+    free(p);
+    dxvk_mov_close(mov);
+    return ok ? 0 : 1;
+}
+
+/*
+ * Arena agreement: ARENA.TSV lists files (relative to the TSV's folder) with Resolume Arena 7.28's
+ * verdict: "play", "black" (loads, every frame shows black) or "not-a-clip" (not loaded as video).
+ * DXVKit's verdict: not-a-clip when the file does not open as a DXV movie, black when any packet is
+ * rejected, play when every packet decodes. Prints both and counts the disagreements.
+ */
+static int cmd_arena(int argc, char **argv)
+{
+    char dir[4096], line[8192], path[8192];
+    const char *slash;
+    FILE *f;
+    frame_buffers b;
+    dxvk_options opt;
+    int rows = 0, agree = 0;
+    if (argc < 1)
+        return 2;
+    memset(&b, 0, sizeof b);
+    memset(&opt, 0, sizeof opt);
+    slash = strrchr(argv[0], '/');
+    if (slash)
+        snprintf(dir, sizeof dir, "%.*s", (int)(slash - argv[0]), argv[0]);
+    else
+        snprintf(dir, sizeof dir, ".");
+    f = fopen(argv[0], "r");
+    if (!f) {
+        fprintf(stderr, "cannot open %s\n", argv[0]);
+        return 1;
+    }
+    printf("%-4s %-58s %-10s %-10s %s\n", "col", "file", "arena", "dxvkit", "detail");
+    while (fgets(line, sizeof line, f)) {
+        char *col[4], *s = line, *e;
+        int n = 0;
+        dxvk_mov *mov = NULL;
+        dxvk_status st;
+        const char *verdict;
+        char detail[200] = "";
+        if (line[0] == '#' || line[0] == '\n')
+            continue;
+        if ((e = strchr(line, '\n')) != NULL)
+            *e = 0;
+        while (n < 4) {
+            col[n++] = s;
+            e = strchr(s, '\t');
+            if (!e)
+                break;
+            *e = 0;
+            s = e + 1;
+        }
+        if (n < 3)
+            continue;
+        rows++;
+        snprintf(path, sizeof path, "%s/%s", dir, col[1]);
+        st = dxvk_mov_open_file(path, &mov);
+        if (st != DXVK_OK) {
+            verdict = "not-a-clip";
+            snprintf(detail, sizeof detail, "%s", dxvk_status_string(st));
+        } else {
+            const dxvk_mov_info *in = dxvk_mov_get_info(mov);
+            uint32_t bad = 0;
+            dxvk_status first = DXVK_OK;
+            dxvk_frame_layout l;
+            for (uint32_t i = 0; i < in->frame_count; i++) {
+                st = decode_frame(mov, i, &opt, &b, &l, NULL, NULL);
+                if (st == DXVK_OK)
+                    st = to_rgba(&l, &opt, &b);
+                if (st != DXVK_OK && !bad++)
+                    first = st;
+            }
+            verdict = bad || !in->frame_count ? "black" : "play";
+            if (bad)
+                snprintf(detail, sizeof detail, "%u/%u packets rejected: %s", bad, in->frame_count,
+                         dxvk_status_string(first));
+            else
+                snprintf(detail, sizeof detail, "%u packets, %s", in->frame_count,
+                         dxvk_variant_name(l.variant));
+            dxvk_mov_close(mov);
+        }
+        if (strcmp(verdict, col[2]) == 0)
+            agree++;
+        printf("%-4s %-58s %-10s %-10s %s%s\n", col[0], col[1], col[2], verdict,
+               strcmp(verdict, col[2]) == 0 ? "" : "DISAGREE: ", detail);
+    }
+    fclose(f);
+    printf("\nfiles %d | agree %d | disagree %d\n", rows, agree, rows - agree);
+    buffers_free(&b);
+    return rows == agree && rows > 0 ? 0 : 1;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -1422,6 +1537,9 @@ static void usage(void)
             "  dxvtool dump-blocks FILE FRAME OUTPREFIX\n"
             "  dxvtool dump-rgba FILE FRAME OUT.rgba [--premultiply]\n"
             "  dxvtool verify VECTORS.TSV [--threads N]\n"
+            "  dxvtool arena ARENA_FORMS.TSV   (DXVKit's verdict vs Resolume Arena's, per file)\n"
+            "  dxvtool dump-packet FILE FRAME OUT\n"
+            "  dxvtool version\n"
             "  dxvtool check FILE... [--threads N] [--histogram]\n"
             "  dxvtool bench FILE [--threads N] [--seconds S] [--frames N]\n"
             "  dxvtool encode IN... OUT.mov [--variant dxt1|dxt5|ycg6|yg10] [--effort fast|best]\n"
@@ -1445,6 +1563,10 @@ int main(int argc, char **argv)
             snprintf(buf, sizeof buf, "%d", default_threads());
             argv[a + 1] = buf;
         }
+    if (argc >= 2 && strcmp(argv[1], "version") == 0) {
+        printf("dxvtool %s (DXVKit %s)\n", DXVKIT_VERSION, dxvk_version_string());
+        return 0;
+    }
     if (argc >= 3 && strcmp(argv[1], "info") == 0)
         rc = cmd_info(argc - 2, argv + 2);
     else if (argc >= 3 && strcmp(argv[1], "dump-blocks") == 0)
@@ -1467,6 +1589,10 @@ int main(int argc, char **argv)
         rc = cmd_psnr(argc - 2, argv + 2);
     else if (argc >= 3 && strcmp(argv[1], "dump-samples") == 0)
         rc = cmd_dump_samples(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "arena") == 0)
+        rc = cmd_arena(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "dump-packet") == 0)
+        rc = cmd_dump_packet(argc - 2, argv + 2);
     else if (argc >= 3 && strcmp(argv[1], "cmp-rgba") == 0)
         rc = cmd_cmp_rgba(argc - 2, argv + 2);
     if (rc == 2)

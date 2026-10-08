@@ -41,9 +41,12 @@ const char *dxvk_status_string(dxvk_status status)
     case DXVK_ERR_MOV_CORRUPT: return "malformed QuickTime file";
     case DXVK_ERR_OUT_OF_MEMORY: return "out of memory";
     case DXVK_ERR_RANGE: return "frame index out of range";
+    case DXVK_ERR_BAD_HEADER: return "DXV3 header: version byte below 4 or stored flag above 1";
     }
     return "unknown status";
 }
+
+const char *dxvk_version_string(void) { return DXVKIT_VERSION; }
 
 const char *dxvk_variant_name(dxvk_variant variant)
 {
@@ -108,44 +111,49 @@ dxvk_status dxvk_layout(dxvk_variant variant, uint32_t width, uint32_t height,
     return DXVK_OK;
 }
 
-/* Parses the header. *header_size = header bytes, *payload_size = declared payload length. */
+/* 1 when the packet is a DXV3 packet: its first four bytes are one of the four texture tags. Any other
+ * packet is legacy. The packet decides, never the container FourCC (spec 2.2). */
+static int is_dxv3_packet(const uint8_t *p, size_t size, dxvk_variant *variant)
+{
+    if (size < 4u)
+        return 0;
+    switch (dxvk_le32(p)) {
+    case TAG_DXT1: *variant = DXVK_VARIANT_DXT1; return 1;
+    case TAG_DXT5: *variant = DXVK_VARIANT_DXT5; return 1;
+    case TAG_YCG6: *variant = DXVK_VARIANT_YCG6; return 1;
+    case TAG_YG10: *variant = DXVK_VARIANT_YG10; return 1;
+    }
+    return 0;
+}
+
+/* Parses the header. *header_size = header bytes, *payload_size = declared payload length. The
+ * generation argument is only validated: the packet itself decides (spec 2.2). */
 static dxvk_status parse_header(dxvk_generation generation, const uint8_t *p, size_t size,
                                 dxvk_variant *variant, int *stored, size_t *header_size,
                                 size_t *payload_size)
 {
-    if (generation == DXVK_GEN_DXV3) {
-        uint32_t tag;
+    if (generation != DXVK_GEN_DXV3 && generation != DXVK_GEN_LEGACY && generation != DXVK_GEN_AUTO)
+        return DXVK_ERR_ARGUMENT;
+    if (is_dxv3_packet(p, size, variant)) {
         if (size < DXV3_HEADER)
             return DXVK_ERR_TRUNCATED;
-        tag = dxvk_le32(p);
-        switch (tag) {
-        case TAG_DXT1: *variant = DXVK_VARIANT_DXT1; break;
-        case TAG_DXT5: *variant = DXVK_VARIANT_DXT5; break;
-        case TAG_YCG6: *variant = DXVK_VARIANT_YCG6; break;
-        case TAG_YG10: *variant = DXVK_VARIANT_YG10; break;
-        default: return DXVK_ERR_UNKNOWN_VARIANT;
-        }
-        *stored = p[6] != 0;
+        /* version byte = version + 1: below 4 is invalid; stored flag only 0 or 1 (spec 3.2) */
+        if (p[4] < 4u || p[6] > 1u)
+            return DXVK_ERR_BAD_HEADER;
+        *stored = p[6];
         *header_size = DXV3_HEADER;
         *payload_size = dxvk_le32(p + 8);
-    } else if (generation == DXVK_GEN_LEGACY) {
-        uint32_t word, type, nibble;
+    } else {
+        uint32_t word, type;
         if (size < LEGACY_HEADER)
             return DXVK_ERR_TRUNCATED;
         word = dxvk_le32(p);
         type = word >> 24;
-        nibble = type & 0x0Fu;
-        if (type & 0x40u)
-            *variant = DXVK_VARIANT_LEGACY_DXT5;
-        else if ((type & 0x20u) || nibble == 2u)
-            *variant = DXVK_VARIANT_LEGACY_DXT1;
-        else
-            return DXVK_ERR_UNKNOWN_VARIANT;
+        /* bit 0x40 selects DXT5, everything else is DXT1; no type byte is rejected (spec 4.1) */
+        *variant = (type & 0x40u) ? DXVK_VARIANT_LEGACY_DXT5 : DXVK_VARIANT_LEGACY_DXT1;
         *stored = (type & 0x80u) != 0;
         *header_size = LEGACY_HEADER;
         *payload_size = word & 0xFFFFFFu;
-    } else {
-        return DXVK_ERR_ARGUMENT;
     }
     if (*payload_size > size - *header_size)
         return DXVK_ERR_TRUNCATED;
@@ -204,12 +212,14 @@ dxvk_status dxvk_decode_blocks(dxvk_generation generation, const void *packet, s
     memset(&cons, 0, sizeof cons);
 
     if (stored) {
-        if (variant == DXVK_VARIANT_YCG6 || variant == DXVK_VARIANT_YG10)
-            return DXVK_ERR_UNSUPPORTED;
-        if (payload_size < layout.bytes[0])
+        /* the plane streams back to back: HQ = plane 0 then plane 1 (spec 3.3, 4.2) */
+        size_t need = layout.bytes[0] + layout.bytes[1];
+        if (payload_size < need)
             return DXVK_ERR_PAYLOAD_END;
         memcpy(planes[0], payload, layout.bytes[0]);
-        used = layout.bytes[0];
+        if (layout.plane_count == 2)
+            memcpy(planes[1], payload + layout.bytes[0], layout.bytes[1]);
+        used = need;
     } else {
         size_t blocks = (size_t)layout.blocks_x[0] * layout.blocks_y[0];
         switch (variant) {

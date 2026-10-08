@@ -228,3 +228,40 @@ Prose and tables in `docs/spec/DXV_FORMAT.md` (2.2, 3.1-3.3, 4.1, 8.1, 8.2, 8.4,
 status cells), `test_vectors/README.md` (a note), this entry. Scratch scripts (QuickTime reader /
 writer, LZF packer, form builder, pattern generators, model fits, the Syphon client) stayed in the
 session scratch folder. Nothing in `src/`, `include/`, `swift/`, `tools/` was changed. No new vectors.
+
+## Phase B attestation (W6, the clean room: Arena rules, v1.0.0)
+
+- Session: Claude Code (Claude Opus 5.5), session `5724d148-6d5f-4953-9120-562ba246ddf6`, on Amrit's
+  Mac, working directory `~/Documents/claude/DXVKit`. Fresh session after /clear.
+- Date: 2026-10-08, roughly 18:10-19:30 UTC.
+- Brief: `docs/handoffs/dxvkit_2026-10-08_w6-arena-rules-brief.md` (clean room).
+
+### Read
+
+| What | Why |
+|---|---|
+| `CLAUDE.md`, Amrit's global `~/.claude/CLAUDE.md`, the W6 brief, the W5 results and W3 fair-comparison handoffs | rules, findings, the comparison method |
+| `docs/spec/DXV_FORMAT.md`, `docs/spec/ENCODING_NOTES.md`, `docs/cleanroom/*`, `docs/design*.md`, `README.md`, `test_vectors/README.md` | the rules to implement |
+| DXVKit's own sources, tests, fuzz harnesses (`src/`, `include/`, `swift/`, `tools/`, `tests/`) | the code being changed |
+| Data files only (no code): the W5 form files `~/Movies/Testfiles/dxvkit-w5-*`, and from the W5 session's scratch folder its six Syphon captures (`w5/syphon/*.rgba`, raw RGBA of Arena's output, our own pattern). Listing that folder showed file names; none of its scripts or its Syphon client source was opened | vectors, colour measurement |
+
+**No FFmpeg, Glance, GlEnc, CueGlance, MaCrate or LoadEhr source was read, fetched or summarised.**
+
+### Black-box use
+
+- Resolume Arena 7.28 via its MCP server: status, layer 8 info, clip search (read only); loaded two
+  flat-grey `YCG6` files (`~/Movies/Testfiles/dxvkit-w6-grey/`) into layer 8, columns 37 and 38,
+  **not triggered**. Composition not saved.
+- FFmpeg 8.1.1 binary: `testsrc2` generation, decoding the lossless qtrle Alley source to raw RGBA.
+- DXVKit's `dxvtool` (old and new builds).
+
+### Wrote
+
+`src/packet.c`, `src/mov.c`, `src/pixels.c`, `src/enc.c`, `src/enc_bc.c`, `src/enc_priv.h`,
+`include/dxvkit.h`, `include/dxvkit.hpp`, `swift/Sources/DXVKit/DXVKit.swift`, the Swift and C++ tests,
+`tools/dxvtool.c`, `tools/fuzz_packet.c` (comment), `CMakeLists.txt`, `CHANGELOG.md`, `README.md`,
+`docs/design.md` (W6 section), `docs/design-encoder.md`, `docs/cleanroom/QUESTIONS.md` (W6 section),
+this entry; test vectors (`streams/arena/` copied from `~/Movies/Testfiles/dxvkit-w5-forms/` with
+`cp -p`, references written by DXVKit, `arena_forms.tsv`, `vectors.tsv`, `MANIFEST.sha256`,
+`test_vectors/README.md`). Scratch scripts (vector-row generator, model fit, statistics) stayed in the
+session scratch folder. The spec (`docs/spec/`) was not edited.

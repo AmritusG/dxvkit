@@ -6,7 +6,7 @@
  *   if (movie.open("clip.mov") != DXVK_OK) ...
  *   dxvk::Frame frame;                       // reusable; grows once, then no allocation
  *   movie.decode(n, frame);                  // block streams: frame.plane(0), frame.plane(1)
- *   frame.to_rgba(rgba, stride);             // optional CPU conversion
+ *   frame.to_rgba(rgba, stride);             // optional CPU conversion (HQ: Arena's convention)
  *
  *   dxvk::Encoder enc;                       // encoder: RGBA8 or block planes -> DXV3 packet
  *   enc.create(DXVK_VARIANT_YCG6, 1920, 1080, &options);
@@ -27,6 +27,9 @@
 #include <vector>
 
 namespace dxvk {
+
+/* The linked library's version string ("1.0.0"); DXVKIT_VERSION is the header's. */
+inline const char *version() { return dxvk_version_string(); }
 
 /* Decoded frame: the block streams of the last decode plus its layout. Reuse it across frames. */
 class Frame {

@@ -13,6 +13,10 @@ import CDXVKit
 import Dispatch
 import Foundation
 
+/// DXVKit's version (the release tag, e.g. "1.0.0"); `DXVKitLibraryVersion` is the linked C core's.
+public let DXVKitVersion = "1.0.0"
+public var DXVKitLibraryVersion: String { String(cString: dxvk_version_string()) }
+
 public struct DXVError: Error, CustomStringConvertible, Equatable {
     public let code: Int32
     public var description: String { String(cString: dxvk_status_string(dxvk_status(rawValue: UInt32(code)))) }
@@ -157,6 +161,8 @@ public final class DXVFrame {
     }
 
     /// RGBA8 at the display size into caller memory (bytesPerRow >= displayWidth * 4).
+    /// YCG6 / YG10 follow Resolume Arena's convention (exact BC4 palettes, nearest chroma, chroma
+    /// midpoint 127.5, R / B overflow folding); DXT1 / DXT5 the spec's integer BC1 / BC3 convention.
     public func convertToRGBA(into destination: UnsafeMutableRawPointer, bytesPerRow: Int,
                               options: DXVOptions = DXVOptions()) throws {
         guard layout != nil else { throw DXVError(DXVK_ERR_ARGUMENT) }
@@ -180,9 +186,17 @@ public final class DXVFrame {
     }
 }
 
+/// The container's generation (a hint). Since 1.0 the packet decides, as Resolume Arena does: a packet
+/// that starts with a DXV3 texture tag is DXV3, any other is legacy; all three values decode the same.
 public enum DXVGeneration: Sendable {
-    case dxv3, legacy
-    var c: dxvk_generation { self == .dxv3 ? DXVK_GEN_DXV3 : DXVK_GEN_LEGACY }
+    case dxv3, legacy, auto
+    var c: dxvk_generation {
+        switch self {
+        case .dxv3: return DXVK_GEN_DXV3
+        case .legacy: return DXVK_GEN_LEGACY
+        case .auto: return DXVK_GEN_AUTO
+        }
+    }
 }
 
 /// An open DXV QuickTime file. Thread-safe (packet reads are serialised internally).

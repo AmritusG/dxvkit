@@ -23,7 +23,7 @@ are cited as "spec 7.3"; encoding notes as "notes 6".
 | BC1 (DXT1) | Opaque. Three-colour mode allowed (c0 <= c1) but **never index 3** in it (notes 4). |
 | BC3 (DXT5) | Colour half always decoded four-colour (spec 8.2). Alpha half = BC4 rules. |
 | BC4 | Unsigned; a0 > a1: 8 values (truncating /7); else 6 values (truncating /5) + 0 + 255 (spec 8.3). |
-| YCoCg | Decoder inverse fixed: R = Y + co - cg, G = Y + cg, B = Y - co - cg, co = Co - 128, cg = Cg - 128, chroma nearest-neighbour at (x/2, y/2) (spec 8.4). Exact forward: Y = (R + 2G + B) / 4, co = (R - B) / 2, cg = (2G - R - B) / 4; rounding is ours; keep Co, Cg in 0..255 (notes 5). |
+| YCoCg | Decoder inverse fixed: R = Y + co - cg, G = Y + cg, B = Y - co - cg, co = Co - 128, cg = Cg - 128 (W3 spec text; 127.5 since W5 / W6, see section 4), chroma nearest-neighbour at (x/2, y/2) (spec 8.4). Exact forward: Y = (R + 2G + B) / 4, co = (R - B) / 2, cg = (2G - R - B) / 4; rounding is ours; keep Co, Cg in 0..255 (notes 5). |
 | Alpha | The file does not say straight or premultiplied (spec 8.5). Alley writes straight. |
 | Self-check | Decode every packet, compare block streams with what was packed (identical), payload / literals / opcodes consumed exactly, every FSE stream leaves 32 bits (notes 8). |
 
@@ -75,8 +75,12 @@ replication, truncating integer interpolation). GPU decoders differ by at most a
 | fast | principal axis (power iteration) -> extreme projections -> one least-squares refit -> 565 rounding -> exact nearest-palette indices; four-colour only; solid blocks from optimal single-colour tables | min / max endpoints, eight-value mode, exact nearest indices |
 | best | as fast, then iterated least-squares refits, a +-1 search on each 565 endpoint component, DXT1 also tries the three-colour mode (without index 3) | eight-value mode with an endpoint search around min / max plus a least-squares refit, and the six-value mode (0 / 255 extremes) when the block touches 0 or 255; keeps the lowest error |
 
-YCoCg (YCG6, YG10): Y = (R + 2G + B + 2) >> 2 per pixel; Co, Cg = the mean of the 2 x 2 pixels' exact
-co / cg, rounded, + 128, clamped to 0..255. Same transform for both efforts.
+YCoCg (YCG6, YG10), W3: Y = (R + 2G + B + 2) >> 2 per pixel; Co, Cg = the mean of the 2 x 2 pixels' exact
+co / cg, rounded, + 128, clamped to 0..255. **Since W6 (1.0.0, finding F7):** the exact unrounded transform
+of ENCODING_NOTES 5, like Alley: Y = (R + 2G + B) / 4, Co / Cg = the 2 x 2 box average of (R - B) / 2 and
+(2G - R - B) / 4, + 127.5, held in 1/16 units and handed to a BC4 encoder that measures error against the
+exact palette (`dxvk_bc4_encode_fine`; same search as the W3 BC4 encoder per effort). The alpha plane and
+DXT1 / DXT5 are unchanged. Same transform for both efforts.
 
 ## 5. Packers
 

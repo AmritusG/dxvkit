@@ -55,6 +55,8 @@ typedef struct solid_entry {
 /* Block encoders. pixels: 16 x RGBA, pixel (x, y) at 4y + x. */
 void dxvk_bc1_encode(const uint8_t px[16][4], int best, int bc3_colour, uint8_t out[8]);
 void dxvk_bc4_encode(const uint8_t v[16], int best, uint8_t out[8]);
+/* BC4 for fractional targets in units of 1/16 (0..4080), error against the exact palette (HQ Y / Co / Cg). */
+void dxvk_bc4_encode_fine(const uint16_t v[16], int best, uint8_t out[8]);
 
 /* One HQ section's working memory (enc_hq.c). */
 typedef struct hq_channel {

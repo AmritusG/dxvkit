@@ -10,6 +10,8 @@
 #include "enc_priv.h"
 #include "enc_tables.h"
 
+#include <math.h>
+
 DXVK_INLINE int exp5(int v) { return (v << 3) | (v >> 2); }
 DXVK_INLINE int exp6(int v) { return (v << 2) | (v >> 4); }
 
@@ -421,6 +423,145 @@ void dxvk_bc4_encode(const uint8_t v[16], int best, uint8_t out[8])
                 bc4_try(v, lo6, hi6, &b);
                 if (hi6 - lo6 >= 2)
                     bc4_try(v, lo6 + 1, hi6 - 1, &b);
+            }
+        }
+    }
+    out[0] = (uint8_t)b.a0;
+    out[1] = (uint8_t)b.a1;
+    for (int i = 0; i < 6; i++)
+        out[2 + i] = (uint8_t)(b.bits >> (8 * i));
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* BC4 with fractional targets (HQ Y, Co, Cg; W6)                                                 */
+/* ---------------------------------------------------------------------------------------------- */
+
+/* Targets are in units of 1/16 (0..4080): the exact YCoCg values of ENCODING_NOTES 5 are multiples of
+ * 1/4 (Y), 1/8 (Co) and 1/16 (Cg). The error is measured against the exact palette (no truncation), the
+ * way a GPU and spec 8.4 read the block, in units of 1/560 (= 1/16 x 1/35). */
+
+#define FINE_MAX 4080
+
+static uint64_t bc4f_eval(const uint16_t v[16], int a0, int a1, uint64_t *bits, uint64_t limit)
+{
+    int64_t pal[8];
+    uint64_t err = 0, idx = 0;
+    pal[0] = (int64_t)a0 * 560;
+    pal[1] = (int64_t)a1 * 560;
+    if (a0 > a1) {
+        for (int i = 1; i <= 6; i++)
+            pal[1 + i] = (int64_t)((7 - i) * a0 + i * a1) * 80;
+    } else {
+        for (int i = 1; i <= 4; i++)
+            pal[1 + i] = (int64_t)((5 - i) * a0 + i * a1) * 112;
+        pal[6] = 0;
+        pal[7] = 255 * 560;
+    }
+    for (int i = 0; i < 16; i++) {
+        int64_t t = (int64_t)v[i] * 35;
+        uint64_t be = UINT64_MAX;
+        int bi = 0;
+        for (int j = 0; j < 8; j++) {
+            int64_t d = t - pal[j];
+            uint64_t dd = (uint64_t)(d * d);
+            if (dd < be) {
+                be = dd;
+                bi = j;
+            }
+        }
+        err += be;
+        idx |= (uint64_t)bi << (3 * i);
+        if (err > limit)
+            return err;
+    }
+    *bits = idx;
+    return err;
+}
+
+typedef struct bc4f_best {
+    uint64_t err;
+    int a0, a1;
+    uint64_t bits;
+} bc4f_best;
+
+DXVK_INLINE void bc4f_try(const uint16_t v[16], int a0, int a1, bc4f_best *b)
+{
+    uint64_t bits, e;
+    if (a0 < 0 || a0 > 255 || a1 < 0 || a1 > 255)
+        return;
+    e = bc4f_eval(v, a0, a1, &bits, b->err);
+    if (e < b->err) {
+        b->err = e;
+        b->a0 = a0;
+        b->a1 = a1;
+        b->bits = bits;
+    }
+}
+
+void dxvk_bc4_encode_fine(const uint16_t v[16], int best, uint8_t out[8])
+{
+    int mn = FINE_MAX, mx = 0, lo, hi;
+    bc4f_best b;
+    b.err = UINT64_MAX;
+    b.a0 = b.a1 = 0;
+    b.bits = 0;
+    for (int i = 0; i < 16; i++) {
+        if (v[i] < mn)
+            mn = v[i];
+        if (v[i] > mx)
+            mx = v[i];
+    }
+    lo = mn / 16;          /* floor */
+    hi = (mx + 15) / 16;   /* ceil */
+    if (lo == hi) {
+        /* every target the same whole number: a0 = a1, six-value mode, every index 0 */
+        b.a0 = b.a1 = lo;
+    } else {
+        bc4f_try(v, hi, lo, &b);
+        if (best && b.err) {
+            /* eight-value mode: endpoints pulled inwards */
+            for (int d0 = 0; d0 <= 2; d0++)
+                for (int d1 = 0; d1 <= 2; d1++)
+                    if (hi - d0 > lo + d1)
+                        bc4f_try(v, hi - d0, lo + d1, &b);
+            /* least-squares refit of the eight-value endpoints from the best indices */
+            if (b.a0 > b.a1) {
+                double aa = 0, ab = 0, bb = 0, ax = 0, bx = 0, det;
+                for (int i = 0; i < 16; i++) {
+                    int s = (int)((b.bits >> (3 * i)) & 7u);
+                    int a = s == 0 ? 7 : s == 1 ? 0 : 8 - s, w = 7 - a;
+                    double t = v[i] / 16.0;
+                    aa += a * a, ab += a * w, bb += w * w;
+                    ax += a * t, bx += w * t;
+                }
+                det = aa * bb - ab * ab;
+                if (det != 0) {
+                    int r0 = (int)floor(7.0 * (bb * ax - ab * bx) / det + 0.5);
+                    int r1 = (int)floor(7.0 * (aa * bx - ab * ax) / det + 0.5);
+                    for (int d0 = -1; d0 <= 1; d0++)
+                        for (int d1 = -1; d1 <= 1; d1++)
+                            if (r0 + d0 > r1 + d1)
+                                bc4f_try(v, r0 + d0, r1 + d1, &b);
+                }
+            }
+            /* six-value mode when the block reaches the 0 / 255 extremes */
+            if (mn <= 8 * 16 || mx >= 247 * 16) {
+                int lo6 = FINE_MAX, hi6 = 0;
+                for (int i = 0; i < 16; i++) {
+                    if (v[i] == 0 || v[i] == FINE_MAX)
+                        continue;
+                    if (v[i] < lo6)
+                        lo6 = v[i];
+                    if (v[i] > hi6)
+                        hi6 = v[i];
+                }
+                if (lo6 > hi6)
+                    lo6 = hi6 = 0;
+                lo6 /= 16;
+                hi6 = (hi6 + 15) / 16;
+                bc4f_try(v, lo6, hi6, &b);
+                if (hi6 - lo6 >= 2)
+                    bc4f_try(v, lo6 + 1, hi6 - 1, &b);
             }
         }
     }

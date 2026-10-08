@@ -225,22 +225,20 @@ static void rows_bc(const compress_job *j, uint32_t begin, uint32_t end)
     }
 }
 
-DXVK_INLINE uint8_t clamp_u8(int v) { return (uint8_t)(v < 0 ? 0 : v > 255 ? 255 : v); }
-
-/* Floor division by a power of two for possibly negative sums. */
-DXVK_INLINE int shift_floor(int v, unsigned s) { return v >= 0 ? v >> s : -((-v + (1 << s) - 1) >> s); }
-
 static void rows_hq(const compress_job *j, uint32_t begin, uint32_t end)
 {
     const dxvk_encoder *e = j->e;
     const dxvk_frame_layout *l = &e->layout;
     int ya = e->variant == DXVK_VARIANT_YG10, best = e->opt.effort == DXVK_EFFORT_BEST;
     size_t y_bytes = ya ? 16u : 8u;
-    uint8_t yv[8][8], av[8][8], blk[16], co[16], cg[16];
+    uint16_t yv[8][8], blk16[16], co[16], cg[16];
+    uint8_t av[8][8], blk[16];
 
     for (uint32_t cy = begin; cy < end; cy++) {
         for (uint32_t cx = 0; cx < l->blocks_x[1]; cx++) {
-            /* forward YCoCg over the 8 x 8 pixels of one chroma block */
+            /* Forward YCoCg over the 8 x 8 pixels of one chroma block, exact and unrounded, in units
+             * of 1/16 (ENCODING_NOTES 5): Y = (R + 2G + B) / 4; Co, Cg = the 2 x 2 box average of
+             * (R - B) / 2 and (2G - R - B) / 4, + 127.5. Co and Cg span exactly 0..255. */
             for (uint32_t sy = 0; sy < 4; sy++) {
                 for (uint32_t sx = 0; sx < 4; sx++) {
                     int sum_co = 0, sum_cg = 0;
@@ -248,14 +246,13 @@ static void rows_hq(const compress_job *j, uint32_t begin, uint32_t end)
                         uint32_t x = sx * 2u + (k & 1u), y = sy * 2u + (k >> 1);
                         const uint8_t *p = pixel(j, cx * 8u + x, cy * 8u + y);
                         int r = p[0], g = p[1], b = p[2];
-                        yv[y][x] = (uint8_t)((r + 2 * g + b + 2) >> 2);
+                        yv[y][x] = (uint16_t)(4 * (r + 2 * g + b));
                         av[y][x] = p[3];
-                        sum_co += r - b;          /* 2 co per pixel */
-                        sum_cg += 2 * g - r - b;  /* 4 cg per pixel */
+                        sum_co += r - b;          /* 2 co per pixel, 4 pixels: 8 co */
+                        sum_cg += 2 * g - r - b;  /* 4 cg per pixel, 4 pixels: 16 cg */
                     }
-                    /* mean over 4 pixels, rounded: co = sum / 8, cg = sum / 16 */
-                    co[sy * 4u + sx] = clamp_u8(128 + shift_floor(sum_co + 4, 3));
-                    cg[sy * 4u + sx] = clamp_u8(128 + shift_floor(sum_cg + 8, 4));
+                    co[sy * 4u + sx] = (uint16_t)(2 * sum_co + 2040); /* 16 (sum / 8 + 127.5) */
+                    cg[sy * 4u + sx] = (uint16_t)(sum_cg + 2040);     /* 16 (sum / 16 + 127.5) */
                 }
             }
             for (uint32_t sub = 0; sub < 4; sub++) {
@@ -264,8 +261,8 @@ static void rows_hq(const compress_job *j, uint32_t begin, uint32_t end)
                 uint8_t *dst = j->plane[0] + ((size_t)by * l->blocks_x[0] + bx) * y_bytes;
                 for (uint32_t y = 0; y < 4; y++)
                     for (uint32_t x = 0; x < 4; x++)
-                        blk[y * 4u + x] = yv[oy + y][ox + x];
-                dxvk_bc4_encode(blk, best, dst);
+                        blk16[y * 4u + x] = yv[oy + y][ox + x];
+                dxvk_bc4_encode_fine(blk16, best, dst);
                 if (ya) {
                     for (uint32_t y = 0; y < 4; y++)
                         for (uint32_t x = 0; x < 4; x++)
@@ -275,8 +272,8 @@ static void rows_hq(const compress_job *j, uint32_t begin, uint32_t end)
             }
             {
                 uint8_t *dst = j->plane[1] + ((size_t)cy * l->blocks_x[1] + cx) * 16u;
-                dxvk_bc4_encode(co, best, dst);
-                dxvk_bc4_encode(cg, best, dst + 8);
+                dxvk_bc4_encode_fine(co, best, dst);
+                dxvk_bc4_encode_fine(cg, best, dst + 8);
             }
         }
     }

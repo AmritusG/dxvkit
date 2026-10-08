@@ -54,9 +54,33 @@ final class DXVKitTests: XCTestCase {
             }
             decoded += 1
         }
-        XCTAssertEqual(decoded, 91)
-        XCTAssertEqual(streams, 127)
-        XCTAssertEqual(rejected, 11)
+        XCTAssertEqual(decoded, 287)
+        XCTAssertEqual(streams, 366)
+        XCTAssertEqual(rejected, 47)
+    }
+
+    func testVersionAndArenaRules() throws {
+        XCTAssertEqual(DXVKitVersion, "1.0.0")
+        XCTAssertEqual(DXVKitLibraryVersion, DXVKitVersion)
+        // Arena 7.28 rules: DXD4 loads, the packet decides the generation, stored HQ plays.
+        let dxd4 = try DXVMovie(url: vectors.appendingPathComponent("streams/arena/dxvkit-w5_23_fourcc-DXD4-dxt1_256.mov"))
+        XCTAssertEqual(dxd4.variant, .dxt1)
+        let cross = try DXVMovie(url: vectors.appendingPathComponent("streams/arena/dxvkit-w5_28_fourcc-DXD3-holding-legacy-type23_256.mov"))
+        XCTAssertEqual(cross.variant, .legacyDXT1)
+        let stored = try DXVMovie(url: vectors.appendingPathComponent("streams/arena/dxvkit-w5_21_dxv3-yg10-storedflag_256.mov"))
+        let control = try DXVMovie(url: vectors.appendingPathComponent("streams/arena/dxvkit-w5_20_dxv3-yg10-control_256.mov"))
+        XCTAssertEqual(try stored.decodeRGBA(at: 3), try control.decodeRGBA(at: 3))
+        // Grey 128 through the HQ encoder plays as 128 (chroma midpoint 127.5).
+        let grey = Data((0..<64 * 64).flatMap { _ in [UInt8(128), 128, 128, 255] })
+        for variant in [DXVVariant.ycg6, .yg10] {
+            let enc = try DXVEncoder(variant: variant, width: 64, height: 64)
+            let packet = try enc.encode(rgba: grey)
+            let frame = DXVFrame()
+            try packet.withUnsafeBytes {
+                try frame.decode(packet: $0, generation: .auto, width: 64, height: 64)
+            }
+            XCTAssertEqual(try frame.rgba(), grey, variant.name)
+        }
     }
 
     func testMovieProperties() throws {

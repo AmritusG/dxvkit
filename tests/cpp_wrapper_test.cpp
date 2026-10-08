@@ -32,7 +32,13 @@ int main(int argc, char **argv)
         "resolume/resolume-alley_ycg6_testsrc2_1920x1080", "resolume/resolume-alley_yg10_testsrc2_1920x1080",
         "glenc/glenc_yg10_pat333x221",                     "glenc/glenc_ycg6_pat18x10",
         "synthetic/synthetic-dxdi_dxt1-lzf_pat100x36",     "synthetic/synthetic-dxdi_dxt5-lzf_pat64",
+        "arena/dxvkit-w5_19_dxv3-ycg6-storedflag_256",     "arena/dxvkit-w5_23_fourcc-DXD4-dxt1_256",
+        "arena/dxvkit-w5_27_fourcc-DXDI-holding-dxv3-dxt1_256",
     };
+    if (std::strcmp(dxvk::version(), DXVKIT_VERSION) != 0 || std::strcmp(DXVKIT_VERSION, "1.0.0") != 0) {
+        std::fprintf(stderr, "version mismatch: header %s, library %s\n", DXVKIT_VERSION, dxvk::version());
+        return 1;
+    }
     dxvk_jobs jobs{run_threads, nullptr};
     dxvk_options threaded{DXVK_OPT_PREMULTIPLY, &jobs};
     dxvk_options single{DXVK_OPT_PREMULTIPLY, nullptr};

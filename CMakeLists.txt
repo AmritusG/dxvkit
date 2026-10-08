@@ -5,7 +5,7 @@ if(APPLE AND NOT DEFINED CMAKE_OSX_ARCHITECTURES AND NOT DXVK_FUZZ)
   set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Universal build")
 endif()
 
-project(DXVKit VERSION 0.1.0 LANGUAGES C CXX)
+project(DXVKit VERSION 1.0.0 LANGUAGES C CXX)
 
 option(DXVK_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(DXVK_FUZZ "Build the libFuzzer harnesses (needs a clang with libFuzzer)" OFF)
@@ -68,6 +68,7 @@ if(DXVK_BUILD_TOOLS)
   add_test(NAME vectors COMMAND dxvtool verify ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors/vectors.tsv)
   add_test(NAME vectors_threaded
            COMMAND dxvtool verify ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors/vectors.tsv --threads 4)
+  add_test(NAME arena_agreement COMMAND dxvtool arena ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors/arena_forms.tsv)
   add_test(NAME cpp_wrapper COMMAND dxvkit_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors ${CMAKE_CURRENT_BINARY_DIR})
   add_test(NAME encoder_round_trip COMMAND dxvkit_encoder_test --out ${CMAKE_CURRENT_BINARY_DIR})
 endif()

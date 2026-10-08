@@ -148,7 +148,8 @@ typedef struct track_tables {
 
 static int is_dxv_fourcc(uint32_t f, dxvk_generation *gen)
 {
-    if (f == FOURCC('D', 'X', 'D', '3')) {
+    /* the FourCCs Arena 7.28 loads; the generation is only a hint, packets decide (spec 2.2) */
+    if (f == FOURCC('D', 'X', 'D', '3') || f == FOURCC('D', 'X', 'D', '4')) {
         *gen = DXVK_GEN_DXV3;
         return 1;
     }

@@ -13,9 +13,13 @@
 extern "C" {
 #endif
 
-#define DXVK_VERSION_MAJOR 0
-#define DXVK_VERSION_MINOR 1
+#define DXVKIT_VERSION "1.0.0"
+#define DXVK_VERSION_MAJOR 1
+#define DXVK_VERSION_MINOR 0
 #define DXVK_VERSION_PATCH 0
+
+/* The library's version string, DXVKIT_VERSION of the build that was linked. */
+const char *dxvk_version_string(void);
 
 /* Largest display width / height accepted (pixels). */
 #define DXVK_MAX_DIMENSION 16384
@@ -29,8 +33,9 @@ typedef enum dxvk_status {
     DXVK_ERR_ARGUMENT,          /* NULL pointer, bad dimension, unknown option */
     DXVK_ERR_BUFFER_TOO_SMALL,  /* a caller buffer is smaller than required */
     DXVK_ERR_TRUNCATED,         /* packet shorter than its header, or header length > packet */
-    DXVK_ERR_UNKNOWN_VARIANT,   /* unknown DXV3 tag, or legacy type word selects no texture */
-    DXVK_ERR_UNSUPPORTED,       /* stored flag on an HQ variant */
+    DXVK_ERR_UNKNOWN_VARIANT,   /* unknown texture variant (not returned by the 1.0 decoder: a packet
+                                   without a DXV3 tag is legacy, and every legacy type byte is valid) */
+    DXVK_ERR_UNSUPPORTED,       /* stored flag on an HQ variant (encoder only since 1.0) */
     DXVK_ERR_PAYLOAD_END,       /* the payload ends before the texture is complete */
     DXVK_ERR_BAD_DISTANCE,      /* a copy reaches before the first block */
     DXVK_ERR_LZF,               /* malformed LZF stream (truncated op, reference before start) */
@@ -48,7 +53,8 @@ typedef enum dxvk_status {
     DXVK_ERR_NO_DXV_TRACK,      /* QuickTime file without a DXV video track */
     DXVK_ERR_MOV_CORRUPT,       /* malformed or inconsistent QuickTime structures */
     DXVK_ERR_OUT_OF_MEMORY,
-    DXVK_ERR_RANGE              /* frame index out of range */
+    DXVK_ERR_RANGE,             /* frame index out of range */
+    DXVK_ERR_BAD_HEADER         /* DXV3 header: version byte below 4, or stored flag other than 0 / 1 */
 } dxvk_status;
 
 /* Static English description of a status code. Never NULL. */
@@ -58,9 +64,15 @@ const char *dxvk_status_string(dxvk_status status);
 /* Variants and geometry                                                                            */
 /* ------------------------------------------------------------------------------------------------ */
 
+/*
+ * Generation of the container (a hint). Since 1.0 the packet decides, as Resolume Arena does (spec 2.2):
+ * a packet whose first four bytes are a DXV3 texture tag is DXV3, any other packet is legacy, whatever
+ * the FourCC. The three values therefore decode identically.
+ */
 typedef enum dxvk_generation {
-    DXVK_GEN_DXV3 = 0,   /* sample-entry FourCC 'DXD3' */
-    DXVK_GEN_LEGACY = 1  /* sample-entry FourCC 'DXDI' (DXV1 / DXV2) */
+    DXVK_GEN_DXV3 = 0,   /* sample-entry FourCC 'DXD3' or 'DXD4' */
+    DXVK_GEN_LEGACY = 1, /* sample-entry FourCC 'DXDI' (DXV1 / DXV2) */
+    DXVK_GEN_AUTO = 2    /* no container information */
 } dxvk_generation;
 
 typedef enum dxvk_variant {
@@ -94,7 +106,8 @@ typedef enum dxvk_block_format {
  *   plane 0: DXT1 / legacy DXT1: BC1 colour.        DXT5 / legacy DXT5: BC3 colour + alpha.
  *            YCG6: BC4 luma (Y).                    YG10: BC5 layout, channel 0 = Y, channel 1 = alpha.
  *            Size: coded_width x coded_height pixels.
- *   plane 1: YCG6 / YG10 only: BC5 layout, channel 0 = Co, channel 1 = Cg (YCoCg chroma, +128 bias).
+ *   plane 1: YCG6 / YG10 only: BC5 layout, channel 0 = Co, channel 1 = Cg (YCoCg chroma, midpoint
+ *            127.5, i.e. 0.5 in normalised texture units: spec 8.4).
  *            Size: coded_width/2 x coded_height/2 samples. Other variants: none (size 0).
  */
 typedef struct dxvk_frame_layout {
@@ -114,7 +127,8 @@ dxvk_status dxvk_layout(dxvk_variant variant, uint32_t width, uint32_t height,
 
 /*
  * Reads the packet header only: the variant and whether the payload is stored. Cheap; does not
- * validate the payload. For DXV3 the packet's own tag decides; for legacy the type word decides.
+ * validate the payload. The packet decides the generation (see dxvk_generation); for DXV3 the tag
+ * decides the variant, for legacy the type byte (0x40 = DXT5, anything else DXT1).
  */
 dxvk_status dxvk_packet_variant(dxvk_generation generation, const void *packet, size_t packet_size,
                                 dxvk_variant *variant, int *stored);
@@ -176,8 +190,10 @@ dxvk_status dxvk_decode_blocks(dxvk_generation generation, const void *packet, s
 /*
  * Converts decoded block streams (output A, layout as returned by dxvk_decode_blocks) to RGBA8 at the
  * display size (output B): rgba points to the top-left pixel, stride = bytes per row (>= width x 4).
- * DXT1 variants are opaque (alpha 255). HQ chroma is sampled nearest-neighbour. Alpha is left as
- * decoded unless options->flags has DXVK_OPT_PREMULTIPLY.
+ * DXT1 variants are opaque (alpha 255). BC1 / BC3: the reference integer convention of spec 8.1 / 8.2.
+ * YCG6 / YG10 (since 1.0): Resolume Arena's convention (spec 8.4): exact BC4 palettes, chroma sampled
+ * nearest-neighbour, chroma midpoint 127.5, R / B overflow folded into the other channel, rounded at the
+ * end. Alpha is left as decoded unless options->flags has DXVK_OPT_PREMULTIPLY.
  */
 dxvk_status dxvk_blocks_to_rgba(const dxvk_frame_layout *layout, const void *const planes[2],
                                 const dxvk_options *options, uint8_t *rgba, size_t stride);
@@ -255,7 +271,8 @@ typedef enum dxvk_opcode_coding {
  * either way: the flag records which convention the caller's file carries (see the spec, 8.5). */
 #define DXVK_ENC_PREMULTIPLIED_INPUT 0x1u
 /* DXT1 / DXT5 only: write stored-flag packets (payload = the raw block stream). Valid per the format but
- * never seen in a real file; off by default. Rejected for YCG6 / YG10 (undefined there). */
+ * never seen in a real file; off by default. Rejected for YCG6 / YG10 (DXVK_ERR_UNSUPPORTED): the decoder
+ * reads stored HQ packets since 1.0, the encoder does not write them. */
 #define DXVK_ENC_STORED_PAYLOAD 0x2u
 
 /* Encoder options. A zeroed struct (or NULL) = defaults: FAST, AUTO, straight input, single thread. */
@@ -286,7 +303,9 @@ const dxvk_frame_layout *dxvk_encoder_layout(const dxvk_encoder *encoder);
 /*
  * RGBA8 (display size, rows top first, stride bytes per row) -> block planes in the decoder's layout
  * (plane 0 / plane 1 of dxvk_encoder_layout), padded to the coded size by edge replication.
- * DXT1 ignores alpha. YCG6 / YG10 apply the forward YCoCg transform and 2 x 2 chroma averaging.
+ * DXT1 ignores alpha. YCG6 / YG10 (since 1.0, like Resolume Alley): the exact forward YCoCg transform
+ * with chroma midpoint 127.5 and a 2 x 2 box average for chroma, unrounded into the BC4 encoder
+ * (ENCODING_NOTES 5), so a grey 128 plays as 128 in Arena.
  */
 dxvk_status dxvk_encoder_compress(dxvk_encoder *encoder, const uint8_t *rgba, size_t stride,
                                   void *const planes[2], const size_t plane_capacity[2]);

@@ -1,0 +1,36 @@
+# Resolume Arena 7.28's verdict on the W5 forms (layer 8 "DXVKit W5 Forms", columns 1-33 of the composition "LoadEhr"; W5 results handoff).
+# Amrit, verbatim: "14, 17, 29 31 plays black. 24, 25, 26, 32, 33 does not register as a clip." Every other column plays.
+# column	file	arena (play | black | not-a-clip)	form
+1	streams/arena/dxvkit-w5_01_legacy-dxt1-lzf-type23-control_256.mov	play	legacy-dxt1-lzf-type23-control
+2	streams/arena/dxvkit-w5_02_legacy-dxt5-lzf-type43_256.mov	play	legacy-dxt5-lzf-type43
+3	streams/arena/dxvkit-w5_03_legacy-dxt1-stored-typeA3_256.mov	play	legacy-dxt1-stored-typeA3
+4	streams/arena/dxvkit-w5_04_legacy-dxt5-stored-typeC3_256.mov	play	legacy-dxt5-stored-typeC3
+5	streams/arena/dxvkit-w5_05_legacy-nibble2-notexbit-type02_256.mov	play	legacy-nibble2-notexbit-type02
+6	streams/arena/dxvkit-w5_06_legacy-dxt1-nibble1-type21_256.mov	play	legacy-dxt1-nibble1-type21
+7	streams/arena/dxvkit-w5_07_legacy-dxt1-nibble4-type24_256.mov	play	legacy-dxt1-nibble4-type24
+8	streams/arena/dxvkit-w5_08_legacy-dxt1-nibble0-type20_256.mov	play	legacy-dxt1-nibble0-type20
+9	streams/arena/dxvkit-w5_09_legacy-bothbits-dxt5data-type63_256.mov	play	legacy-bothbits-dxt5data-type63
+10	streams/arena/dxvkit-w5_10_legacy-notexbit-type03-neg_256.mov	play	legacy-notexbit-type03-neg
+11	streams/arena/dxvkit-w5_11_legacy-dxt1-nibble2-type22_256.mov	play	legacy-dxt1-nibble2-type22
+12	streams/arena/dxvkit-w5_12_dxv3-dxt1-control_256.mov	play	dxv3-dxt1-control
+13	streams/arena/dxvkit-w5_13_dxv3-dxt1-version5_256.mov	play	dxv3-dxt1-version5
+14	streams/arena/dxvkit-w5_14_dxv3-dxt1-version3_256.mov	black	dxv3-dxt1-version3
+15	streams/arena/dxvkit-w5_15_dxv3-dxt1-minor1_256.mov	play	dxv3-dxt1-minor1
+16	streams/arena/dxvkit-w5_16_dxv3-dxt1-reserved1_256.mov	play	dxv3-dxt1-reserved1
+17	streams/arena/dxvkit-w5_17_dxv3-dxt1-storedflag2_256.mov	black	dxv3-dxt1-storedflag2
+18	streams/arena/dxvkit-w5_18_dxv3-ycg6-control_256.mov	play	dxv3-ycg6-control
+19	streams/arena/dxvkit-w5_19_dxv3-ycg6-storedflag_256.mov	play	dxv3-ycg6-storedflag
+20	streams/arena/dxvkit-w5_20_dxv3-yg10-control_256.mov	play	dxv3-yg10-control
+21	streams/arena/dxvkit-w5_21_dxv3-yg10-storedflag_256.mov	play	dxv3-yg10-storedflag
+22	streams/arena/dxvkit-w5_22_dxv3-ycg6-version5_256.mov	play	dxv3-ycg6-version5
+23	streams/arena/dxvkit-w5_23_fourcc-DXD4-dxt1_256.mov	play	fourcc-DXD4-dxt1
+24	streams/arena/dxvkit-w5_24_fourcc-DXV3-dxt1_256.mov	not-a-clip	fourcc-DXV3-dxt1
+25	streams/arena/dxvkit-w5_25_fourcc-DXT1-dxt1_256.mov	not-a-clip	fourcc-DXT1-dxt1
+26	streams/arena/dxvkit-w5_26_fourcc-YCG6-ycg6_256.mov	not-a-clip	fourcc-YCG6-ycg6
+27	streams/arena/dxvkit-w5_27_fourcc-DXDI-holding-dxv3-dxt1_256.mov	play	fourcc-DXDI-holding-dxv3-dxt1
+28	streams/arena/dxvkit-w5_28_fourcc-DXD3-holding-legacy-type23_256.mov	play	fourcc-DXD3-holding-legacy-type23
+29	streams/arena/dxvkit-w5_29_dxv3-dxt1-storedflag2-compressed_256.mov	black	dxv3-dxt1-storedflag2-compressed
+30	streams/arena/dxvkit-w5_30_dxv3-dxt1-version6_256.mov	play	dxv3-dxt1-version6
+31	streams/arena/dxvkit-w5_31_dxv3-dxt1-version0_256.mov	black	dxv3-dxt1-version0
+32	streams/arena/dxvkit-w5_32_fourcc-DXD1-dxt1_256.mov	not-a-clip	fourcc-DXD1-dxt1
+33	streams/arena/dxvkit-w5_33_fourcc-DXDA-dxt1_256.mov	not-a-clip	fourcc-DXDA-dxt1

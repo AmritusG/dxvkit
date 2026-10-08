@@ -1,6 +1,7 @@
 /*
  * libFuzzer harness: packet decode + RGBA conversion.
- * Input: 5-byte prefix (byte 0 bit 0: generation; bytes 1-2 / 3-4: width / height, little-endian,
+ * Input: 5-byte prefix (byte 0 bit 0: generation hint, which since 1.0 does not change the decode;
+ * bytes 1-2 / 3-4: width / height, little-endian,
  * reduced to 1..2048) followed by the packet. Planes are allocated at their exact size so any
  * out-of-bounds write is caught by AddressSanitizer.
  *
