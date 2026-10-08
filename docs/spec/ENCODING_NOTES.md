@@ -23,8 +23,9 @@ and the single-symbol rule (4, 7.1, 7.3).
 - Bytes 0..3 = the tag reversed (`1TXD`, `5TXD`, `6GCY`, `01GY`).
 - Byte 4 = 4, byte 5 = 0, byte 7 = 0 (observed in every packet).
 - Byte 6 (stored flag) = 0 normally. A stored packet (flag 1, payload = the raw block stream) is legal for
-  DXT1 / DXT5 per the format, but no Resolume encoder was seen writing one; prefer the compressed form
-  even when it is larger only if Resolume playback of stored packets has been verified (open question).
+  DXT1 / DXT5 per the format, but no Resolume encoder was seen writing one. Resolume Arena 7.28 plays
+  them (Amrit, W4: DXVKit's 333 x 221 stored-flag DXT1 and DXT5 test files play correctly). Prefer the
+  compressed form; stored is a valid fallback, e.g. when compression would be larger. Not for YCG6 / YG10.
 - Bytes 8..11 = the exact payload length; the sample size = 12 + payload length (observed, always).
 
 ## 3. Texture size

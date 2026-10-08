@@ -733,8 +733,9 @@ CW x CH bytes (YG10, with alpha); HQ chroma CW x CH / 4 bytes.
 
 1. Legacy (`DXDI`) DXT5 (type bit 0x40), stored legacy payloads (0x80), version nibbles other than 3, and
    the "nibble 2 means DXT1" rule: never seen in a real file. Test vectors are synthetic.
-2. DXV3 stored flag = 1: never seen (397,117 DXV3 packets). The meaning is clear for DXT1 / DXT5; undefined for
-   YCG6 / YG10.
+2. DXV3 stored flag = 1: never seen in a file found (397,117 DXV3 packets). The meaning is clear for DXT1 /
+   DXT5, and Resolume Arena 7.28 plays such packets (W4, Amrit: DXVKit's stored-flag DXT1 and DXT5 test
+   files play correctly); undefined for YCG6 / YG10.
 3. DXV3 version / minor / reserved bytes other than 4 / 0 / 0: never seen.
 4. Sample-entry FourCCs other than `DXD3` / `DXDI`: never seen.
 5. Straight versus premultiplied alpha (8.5): files of both kinds exist and nothing in the file says which.
