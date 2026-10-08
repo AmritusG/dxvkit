@@ -53,3 +53,42 @@ N, saved as PNG, then ProRes 4444 for GlEnc's input:
 
 (Phase B appends here: session, date, what it read, an attestation that it did not open FFmpeg, Glance,
 GlEnc, CueGlance or MaCrate source.)
+
+### Phase B attestation (W2, the clean room)
+
+- Session: Claude Code (Claude Opus 5.5), session `a1c3b38d-05d5-4958-b2d4-ab4bb740f08e`, on Amrit's
+  MacBook Pro (Apple M3 Max, 16 cores, 48 GB), working directory `~/Documents/claude/DXVKit`. Fresh
+  session: its context held nothing from Phase A when it started.
+- Date: 2026-10-08, 10:14-11:02 UTC.
+- Brief: `docs/handoffs/dxvkit_2026-10-08_w2-cleanroom-brief.md` (by Cowork).
+
+#### Read
+
+| What | Why |
+|---|---|
+| `CLAUDE.md` (this repo) and Amrit's global `~/.claude/CLAUDE.md` (handoff rules only) | rules |
+| `docs/spec/DXV_FORMAT.md`, `docs/spec/ENCODING_NOTES.md` (in full) | the specification |
+| `docs/handoffs/dxvkit_2026-10-08_w1-spec-results.md`, `dxvkit_2026-10-08_w2-cleanroom-brief.md` | findings, brief |
+| `docs/cleanroom/PROVENANCE.md`, `docs/cleanroom/INVENTORY.md`, `README.md`, `test_vectors/README.md`, `test_vectors/vectors.tsv` | provenance, vector layout |
+| `test_vectors/streams/*`, reference hashes | test data (decoded, compared by SHA-256) |
+| Real DXV files under `~/Movies` (426 files, read as data by our own decoder; none copied) | real-file test, benchmarks |
+| Public knowledge of the QuickTime file format (atoms, `stsd`, `stts`, `stsz`, `stsc`, `stco` / `co64`), S3TC / RGTC (BC1 / BC3 / BC4 / BC5), tANS / FSE decoding as in RFC 8878 section 4.1 and Yann Collet's FSE write-ups, the liblzf format, FIPS 180-4 (SHA-256, for the tool) | written from general knowledge; no web page was fetched and no web search was made in this session |
+
+#### Did not access
+
+FFmpeg (no libavcodec file, mirror or documentation page), Glance / GlanceCore / GlancePlayback,
+glenc-public, GlEnc, CueGlance, MaCrate, Alley internals, or any other DXV implementation, source or
+summary. No web search of any kind. No other session was asked about upstream code. The Phase A
+scratch tools (dump tool, checker, QuickTime writer, LZF compressor) were not opened.
+
+#### Accidental exposure
+
+None. (Some DXV files on disk were written by GlEnc or FFmpeg; they were decoded as data only.)
+
+#### Wrote
+
+All code in `src/`, `include/`, `swift/`, `tests/`, `tools/`, `CMakeLists.txt`, `Package.swift`, plus
+`docs/design.md`, `docs/cleanroom/QUESTIONS.md` and this entry, from the documents above. No
+third-party code is vendored: the FSE decoder, LZF decoder, QuickTime demuxer and SHA-256 are our own.
+Questions where the spec was silent or ambiguous were settled from the test vectors only
+(`docs/cleanroom/QUESTIONS.md`).
