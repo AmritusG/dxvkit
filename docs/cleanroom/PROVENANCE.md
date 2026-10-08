@@ -265,3 +265,17 @@ this entry; test vectors (`streams/arena/` copied from `~/Movies/Testfiles/dxvki
 `cp -p`, references written by DXVKit, `arena_forms.tsv`, `vectors.tsv`, `MANIFEST.sha256`,
 `test_vectors/README.md`). Scratch scripts (vector-row generator, model fit, statistics) stayed in the
 session scratch folder. The spec (`docs/spec/`) was not edited.
+
+## Phase A addendum (W7, docs only: record W6-2, fix the W6-1 sentences)
+
+- Session: Claude Code (Claude Opus 5.5), session `10fd4aad-1f65-4b80-ad18-ce295f2e32d4`, on Amrit's
+  Mac, working directory `~/Documents/claude/DXVKit`. Fresh session after /clear.
+- Date: 2026-10-08.
+- Brief: `docs/handoffs/dxvkit_2026-10-08_w7-docs-close-brief.md`.
+- Read: `CLAUDE.md`, the W7 brief, the W5 and W6 results handoffs, `docs/spec/*`, `docs/cleanroom/*`,
+  `test_vectors/vectors.tsv` (two rows, by grep). **No upstream source of any kind was read** (no FFmpeg,
+  Glance, GlEnc, CueGlance, MaCrate, LoadEhr), no DXV file was measured, no black box was run apart from
+  DXVKit's own `dxvtool verify`.
+- Wrote: `docs/spec/DXV_FORMAT.md` (4.1, 8.4, revision note), `docs/spec/ENCODING_NOTES.md` (5, revision
+  note), `docs/cleanroom/QUESTIONS.md` (W7 section, status cells of 7 and 20), this entry, the W7 handoff.
+  Nothing in `src/`, `include/`, `swift/`, `tools/`, `test_vectors/` was changed.

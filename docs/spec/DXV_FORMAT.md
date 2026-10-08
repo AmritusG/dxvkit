@@ -20,6 +20,9 @@ files of each form were loaded into Arena, their thumbnails read, and each clip 
 the HQ colour questions Arena's composition output was captured pixel-exact (Syphon) and Alley 7.28's
 encodes of a known lossless source were measured.
 
+Revised in W7 (2026-10-08, Phase A; `docs/handoffs/dxvkit_2026-10-08_w7-docs-close-results.md`): 4.1
+and 8.4 no longer describe DXVKit's pre-1.0.0 state (QUESTIONS W6-1).
+
 Conventions: all multi-byte integers inside DXV packets are **little-endian** unless stated otherwise
 (QuickTime container fields are big-endian, as always in QuickTime). `u8`, `u16`, `u32` = unsigned
 integers of 1, 2, 4 bytes. Bit 0 = least significant bit. "Block" = one 4x4-pixel compressed block.
@@ -269,8 +272,8 @@ stored; Arena shows "DXV v.m" with v = version nibble - 1 for nibbles up to 3 an
 The W1 rule ("no texture bit and nibble other than 2: reject") is therefore withdrawn: Arena never
 rejects a legacy packet for its type byte. A decoder MUST select the texture as above and MUST reject
 only: packet shorter than 4 bytes; payload length + 4 > packet size; and the payload errors of 4.2.
-(The invalid vector `bad_dxdi-no-texture-flag`, type byte 0x03 with DXT1 data, now contradicts this rule;
-it is listed as a finding for the next clean-room wave and left unchanged until then.)
+(The W1 invalid vector for type byte 0x03 with DXT1 data was reclassified in W6 as the decode vector
+`synthetic-dxdi_type03-implied-dxt1_pat64`; DXVKit 1.0.0 follows this rule, W5 finding F1.)
 
 ### 4.2 Payload
 
@@ -786,10 +789,11 @@ B to 255; G is unchanged. The exact form Arena uses was not determined further; 
 differences (at most 2 for 98.6 % of bytes) are GPU arithmetic.
 
 Rules: a player that wants to look like Resolume SHOULD use nearest chroma and the 127.5 midpoint, and
-SHOULD fold out-of-gamut values as above. The reference RGBA outputs in `test_vectors/` were produced
-in W1 with midpoint 128, integer BC4 palettes and plain clamping; they stay as they are (the block
-streams are the normative output, the RGBA a convenience) and differ from Arena's convention by up to 1
-in most bytes and more in saturated colours.
+SHOULD fold out-of-gamut values as above. The reference RGBA outputs in `test_vectors/` follow this
+section (exact BC4 palettes, nearest chroma, midpoint 127.5, folding): they were regenerated in W6 for
+DXVKit 1.0.0 (W5 finding F6) and match Arena's Syphon capture within 1 in 97.21 % of bytes, max 11.
+The W1 references used midpoint 128, integer palettes and plain clamping. The block streams remain the
+normative output; the RGBA is a convenience.
 
 ### 8.5 Alpha meaning
 

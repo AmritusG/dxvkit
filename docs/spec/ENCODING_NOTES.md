@@ -7,7 +7,8 @@ described in `docs/cleanroom/INVENTORY.md`.
 
 Revised in W4 (2026-10-08, Phase A): BC3 endpoint order, alpha convention, the extra Y opcode, selector 3
 and the single-symbol rule (4, 7.1, 7.3). Revised in W5 (2026-10-08, Phase A): FourCCs and header bytes
-Arena accepts (1, 2), Resolume's forward YCoCg transform and chroma filter (5).
+Arena accepts (1, 2), Resolume's forward YCoCg transform and chroma filter (5). Revised in W7 (2026-10-08,
+Phase A): 5 states the decided policy (exact Y / Co / Cg) and DXVKit 1.0.0's encoder.
 
 ## 1. Container
 
@@ -82,11 +83,14 @@ Arena accepts (1, 2), Resolume's forward YCoCg transform and chroma filter (5).
     Mean absolute error against the source on the checkerboard area: box 0.33; top-left sample 11.9;
     4 x 4 tent 16.7; co-sited 3 x 3 (1, 2, 1) 16.9. On the vertical ramps: box 0.217, next best 0.221.
   - The `YCG6` and `YG10` exports have the same Y and chroma on these patches; alpha 255 stays 255.
-- For DXVKit's encoder (a finding for the clean room, not a format rule): it currently writes the
-  chroma with midpoint 128 (the W1 text of this section said so). Played in Arena, which reads 127.5,
-  that shifts green up by half a level and blue down by one level (measured over Syphon: an area that
-  DXVKit encoded as Y = Co = Cg = 128, i.e. grey 128, comes back from Arena as 128, 129, 127). Writing the 127.5 midpoint, unrounded targets into the BC4 encoder and the 2 x 2 box
-  average matches Alley and Arena.
+- **Decided policy (Amrit, W7): exact, unrounded Y, Co and Cg**, like Alley. DXVKit 1.0.0 (W6, findings
+  F7) writes the transform above with midpoint 127.5, hands the unrounded values to its BC4 encoder and
+  box-averages chroma over 2 x 2; that is what Arena reads (grey 128 is written as endpoints 128 / 127,
+  entry 127.571, and comes back as 128 / 128 / 128 under the 8.4 model). Before 1.0.0 DXVKit wrote
+  midpoint 128, which Arena showed as 128, 129, 127. Rounding Y to integers (chroma still exact) was
+  measured in W6 on the fair Alley source (3 frames, 1920 x 1080, `YCG6`, fast): 126,236 B / 37.82 dB
+  against 132,336 B / 37.90 dB for exact Y (Alley: 132,032 B / 37.81 dB), i.e. 4.6 % smaller and
+  0.08 dB worse. Amrit declined it ("Keep exact."); an encoder that wants Arena parity keeps exact Y.
 - BC4 endpoint choices: any encoder works; Alley's choices matter only in that it targets fractional
   values (above). W3 measured size and quality parity between Alley and DXVKit's encoder (QUESTIONS 21,
   22).
