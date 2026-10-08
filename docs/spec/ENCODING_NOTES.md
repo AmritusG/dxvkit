@@ -48,7 +48,8 @@ and the single-symbol rule (4, 7.1, 7.3).
 - BC4 for Y / A / Co / Cg: unsigned.
 - Alpha convention: the file has no field for it. Alley writes straight (unpremultiplied) colour; the
   codec in Adobe Media Encoder wrote premultiplied-looking colour; GlEnc varies (writers and readers table:
-  DXV_FORMAT.md 8.5). Write straight, like Alley.
+  DXV_FORMAT.md 8.5). Write straight, like Alley. Arena reads every alpha clip as premultiplied unless the
+  clip's "Alpha Type" is changed, so tell users of straight files to set it.
 
 ## 5. YCoCg (HQ variants)
 

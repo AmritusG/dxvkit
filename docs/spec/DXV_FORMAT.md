@@ -693,12 +693,13 @@ fewer than 500 semi-transparent sample pixels (329 files) cannot be classified):
 | Reader | Treats alpha files as |
 |---|---|
 | FFmpeg 8.1.1 decoder (black box, QUESTIONS 11) | `DXT5`: premultiplied: it outputs un-premultiplied colour, floor(c x 255 / a), clamped. `YG10`: planes output untouched |
-| Resolume Arena | the user chooses per clip (Amrit, W4 brief). Arena's web API does not expose the setting (a clip's parameters list opacity and blend mode only; checked W4), so its name and default are to be confirmed by Amrit |
+| Resolume Arena 7.28 | the user chooses per clip with the clip setting **"Alpha Type"**; the default is **Premultiplied** (Amrit, W4). Arena's web API does not expose it (checked W4). So by default Arena reads every alpha file as premultiplied, like FFmpeg, and an Alley (straight) file needs "Alpha Type" changed to straight to composite as intended |
 | DXVKit decoder | untouched by default; optional straight-to-premultiplied conversion on the RGBA path (QUESTIONS 7) |
 
-So: a writer SHOULD write straight colour (what Alley, Resolume's own encoder application, writes). A reader
-MUST NOT assume either convention silently when it composites; it SHOULD default to straight and let the
-user override per file or clip. The reference RGBA outputs in `test_vectors/` are the decoded values with
+So: a writer SHOULD write straight colour (what Alley, Resolume's own encoder application, writes), and
+whoever plays the file in Arena must then set "Alpha Type" accordingly. A reader MUST NOT treat the
+convention as known: it SHOULD let the user choose per file or clip, as Arena does; a reader that wants
+to match Arena's default reads premultiplied. The reference RGBA outputs in `test_vectors/` are the decoded values with
 no alpha processing.
 
 ---
@@ -737,8 +738,8 @@ CW x CH bytes (YG10, with alpha); HQ chroma CW x CH / 4 bytes.
 3. DXV3 version / minor / reserved bytes other than 4 / 0 / 0: never seen.
 4. Sample-entry FourCCs other than `DXD3` / `DXDI`: never seen.
 5. Straight versus premultiplied alpha (8.5): files of both kinds exist and nothing in the file says which.
-   W4 recorded which writer does what and how FFmpeg reads them; still open: the name and default of
-   Arena's per-clip choice (for Amrit).
+   W4 recorded which writer does what and how readers treat them (Arena: per-clip "Alpha Type", default
+   Premultiplied). Closed as far as the format goes: the file cannot say.
 6. Chroma siting / filtering in Resolume's own HQ playback (the reference uses nearest neighbour).
 7. Resolume's forward YCoCg transform and its BC encoders (an encoder choice; see ENCODING_NOTES.md).
 8. Closed (W4): an entropy-coded opcode stream with a single symbol cannot be written (7.3.1); Resolume
