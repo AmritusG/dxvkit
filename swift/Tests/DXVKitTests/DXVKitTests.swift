@@ -85,4 +85,44 @@ final class DXVKitTests: XCTestCase {
         XCTAssertThrowsError(try movie.decodeRGBA(at: 3))
         XCTAssertThrowsError(try DXVMovie(url: vectors.appendingPathComponent("vectors.tsv")))
     }
+
+    func testEncoderRoundTrip() throws {
+        let source = try DXVMovie(url: vectors.appendingPathComponent("streams/glenc/glenc_yg10_pat333x221.mov"))
+        let rgba = try source.decodeRGBA(at: 0)
+        for variant in [DXVVariant.dxt1, .dxt5, .ycg6, .yg10] {
+            for options in [DXVEncodeOptions(), DXVEncodeOptions(effort: .best, parallel: true),
+                            DXVEncodeOptions(opcodes: .stored)] {
+                let enc = try DXVEncoder(variant: variant, width: source.width, height: source.height, options: options)
+                let packet = try enc.encode(rgba: rgba)
+                let out = FileManager.default.temporaryDirectory.appendingPathComponent("dxvkit-swift-\(variant.name).mov")
+                let writer = try DXVMovieWriter(url: out, width: source.width, height: source.height,
+                                                timescale: 30000, frameDuration: 1001)
+                try writer.append(packet)
+                try writer.append(packet)
+                try writer.finish()
+                let movie = try DXVMovie(url: out)
+                XCTAssertEqual(movie.frameCount, 2)
+                XCTAssertEqual(movie.variant, variant)
+                XCTAssertEqual(movie.frameRate, 30000.0 / 1001.0, accuracy: 1e-9)
+                XCTAssertEqual(try movie.packet(at: 1), packet)
+                let frame = DXVFrame()
+                try movie.decodeBlocks(at: 0, into: frame)
+                for i in 0..<enc.layout.planes.count {
+                    let packed = enc.withPackedPlane(i) { Data($0) }
+                    frame.withPlane(i) { XCTAssertEqual(Data($0), packed, "\(variant.name) plane \(i)") }
+                }
+                // blocks-in path gives the same packet
+                let repacked: Data = try frame.withPlane(0) { p0 in
+                    if enc.layout.planes.count == 2 {
+                        return try frame.withPlane(1) { p1 in try enc.pack(plane0: p0.baseAddress!, plane1: p1.baseAddress!) }
+                    }
+                    return try enc.pack(plane0: p0.baseAddress!)
+                }
+                XCTAssertEqual(repacked, packet)
+                try? FileManager.default.removeItem(at: out)
+            }
+        }
+        XCTAssertThrowsError(try DXVEncoder(variant: .ycg6, width: 64, height: 64, options: DXVEncodeOptions(storedPayload: true)))
+        XCTAssertThrowsError(try DXVEncoder(variant: .legacyDXT1, width: 64, height: 64))
+    }
 }

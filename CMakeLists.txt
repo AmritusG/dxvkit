@@ -35,7 +35,12 @@ add_library(dxvkit STATIC
   src/blockcopy.c
   src/hq.c
   src/pixels.c
-  src/mov.c)
+  src/mov.c
+  src/enc.c
+  src/enc_bc.c
+  src/enc_pack.c
+  src/enc_hq.c
+  src/movwrite.c)
 target_include_directories(dxvkit PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
@@ -46,23 +51,29 @@ install(FILES include/dxvkit.h include/dxvkit.hpp DESTINATION include)
 
 if(DXVK_BUILD_TOOLS)
   find_package(Threads REQUIRED)
-  add_executable(dxvtool tools/dxvtool.c)
-  target_link_libraries(dxvtool PRIVATE dxvkit Threads::Threads)
+  find_package(ZLIB REQUIRED)   # zlib licence; dxvtool's PNG input only, not the library
+  add_executable(dxvtool tools/dxvtool.c tools/imageio.c)
+  target_link_libraries(dxvtool PRIVATE dxvkit Threads::Threads ZLIB::ZLIB m)
   target_compile_options(dxvtool PRIVATE -Wall -Wextra -Werror)
 
   add_executable(dxvkit_cpp_test tests/cpp_wrapper_test.cpp)
   target_link_libraries(dxvkit_cpp_test PRIVATE dxvkit Threads::Threads)
   target_compile_options(dxvkit_cpp_test PRIVATE -Wall -Wextra -Werror)
 
+  add_executable(dxvkit_encoder_test tests/encoder_test.c)
+  target_link_libraries(dxvkit_encoder_test PRIVATE dxvkit Threads::Threads)
+  target_compile_options(dxvkit_encoder_test PRIVATE -Wall -Wextra -Werror)
+
   enable_testing()
   add_test(NAME vectors COMMAND dxvtool verify ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors/vectors.tsv)
   add_test(NAME vectors_threaded
            COMMAND dxvtool verify ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors/vectors.tsv --threads 4)
-  add_test(NAME cpp_wrapper COMMAND dxvkit_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors)
+  add_test(NAME cpp_wrapper COMMAND dxvkit_cpp_test ${CMAKE_CURRENT_SOURCE_DIR}/test_vectors ${CMAKE_CURRENT_BINARY_DIR})
+  add_test(NAME encoder_round_trip COMMAND dxvkit_encoder_test --out ${CMAKE_CURRENT_BINARY_DIR})
 endif()
 
 if(DXVK_FUZZ)
-  foreach(target fuzz_packet fuzz_mov)
+  foreach(target fuzz_packet fuzz_mov fuzz_encode)
     add_executable(${target} tools/${target}.c)
     target_link_libraries(${target} PRIVATE dxvkit)
     target_compile_options(${target} PRIVATE -fsanitize=fuzzer)

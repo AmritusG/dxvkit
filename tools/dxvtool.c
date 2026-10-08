@@ -5,8 +5,14 @@
  *   dxvtool dump-blocks FILE FRAME OUTPREFIX    block stream(s) of one frame
  *   dxvtool dump-rgba FILE FRAME OUT [--premultiply]
  *   dxvtool verify VECTORS.TSV [--threads N]    every test-vector row, byte-exact
- *   dxvtool check FILE... [--threads N]         decode every packet, report byte consumption
+ *   dxvtool check FILE... [--threads N] [--histogram]   decode every packet, report byte consumption
  *   dxvtool bench FILE [--threads N] [--seconds S] [--frames N]
+ *   dxvtool encode IN... OUT.mov [--variant V] [--effort E] [--size WxH] [--fps F] [--threads N] ...
+ *   dxvtool bench-encode SOURCE.rgba --size WxH [--variant V] [--effort E] [--threads N]
+ *   dxvtool repack FILE.mov OUT.mov [--effort E] [--opcodes O]   same blocks, DXVKit's packer
+ *   dxvtool psnr FILE.mov SOURCE.rgba [--frames N]   decoded RGBA vs a raw RGBA source
+ *   dxvtool cmp-rgba A.rgba B.rgba --size WxH [--unpremultiply-b]   byte differences of two RGBA files
+ *   dxvtool dump-samples FILE FRAME OUT              HQ: decoded Y, Co, Cg (, A) sample planes
  *
  * MIT License. Copyright (c) 2026 Amrit Rosell. See LICENSE.
  */
@@ -17,13 +23,16 @@
 #endif
 #define _POSIX_C_SOURCE 200809L
 #include "dxvkit.h"
+#include "imageio.h"
 
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
+#include <math.h>
 
 /* ---------------------------------------------------------------------------------------------- */
 /* SHA-256 (FIPS 180-4)                                                                           */
@@ -584,7 +593,7 @@ static int cmd_verify(int argc, char **argv)
 
 static int cmd_check(int argc, char **argv)
 {
-    int threads = 1, files = 0, files_bad = 0;
+    int threads = 1, files = 0, files_bad = 0, show_histogram = 0;
     unsigned long long packets = 0, errors = 0, inexact = 0, tails = 0;
     pool *pl = NULL;
     dxvk_jobs jobs;
@@ -595,6 +604,9 @@ static int cmd_check(int argc, char **argv)
     for (int a = 0; a + 1 < argc; a++)
         if (strcmp(argv[a], "--threads") == 0)
             threads = atoi(argv[a + 1]);
+    for (int a = 0; a < argc; a++)
+        if (strcmp(argv[a], "--histogram") == 0)
+            show_histogram = 1;
     if (threads > 1) {
         pl = pool_create(threads);
         jobs.run = pool_run;
@@ -616,6 +628,8 @@ static int cmd_check(int argc, char **argv)
             a++;
             continue;
         }
+        if (strcmp(argv[a], "--histogram") == 0)
+            continue;
         files++;
         if (!open_or_report(argv[a], &mov)) {
             files_bad++;
@@ -666,6 +680,12 @@ static int cmd_check(int argc, char **argv)
         if (l.plane_count == 2)
             printf(" | opcode values used %d/18", opcodes_seen);
         printf("\n");
+        if (l.plane_count == 2 && show_histogram) {
+            printf("  opcode histogram (all channels, all packets):");
+            for (int k = 0; k < 18; k++)
+                printf(" %d:%u", k, hist[k]);
+            printf("\n");
+        }
         if (err)
             printf("  first error at frame %u: %s\n", first_err_frame, dxvk_status_string(first_err));
         errors += err;
@@ -769,6 +789,631 @@ static int cmd_bench(int argc, char **argv)
     return 0;
 }
 
+/* 16 values of a BC4 block (spec 8.3), for dump-samples. */
+static void bc4_values(const uint8_t *blk, uint8_t out[16])
+{
+    uint32_t a0 = blk[0], a1 = blk[1];
+    uint64_t idx = 0;
+    uint8_t pal[8];
+    for (int i = 0; i < 6; i++)
+        idx |= (uint64_t)blk[2 + i] << (8 * i);
+    pal[0] = (uint8_t)a0;
+    pal[1] = (uint8_t)a1;
+    if (a0 > a1) {
+        for (uint32_t i = 1; i <= 6; i++)
+            pal[1 + i] = (uint8_t)(((7u - i) * a0 + i * a1) / 7u);
+    } else {
+        for (uint32_t i = 1; i <= 4; i++)
+            pal[1 + i] = (uint8_t)(((5u - i) * a0 + i * a1) / 5u);
+        pal[6] = 0;
+        pal[7] = 255;
+    }
+    for (int i = 0; i < 16; i++, idx >>= 3)
+        out[i] = pal[idx & 7u];
+}
+
+/* Writes one BC4 channel of a plane (block bytes `block_bytes`, channel at `offset`) as w x h samples. */
+static void write_samples(FILE *f, const uint8_t *plane, const dxvk_frame_layout *l, int p,
+                          size_t block_bytes, size_t offset, uint32_t w, uint32_t h)
+{
+    uint8_t *row = (uint8_t *)malloc((size_t)l->pixels_x[p] * 4u), v[16];
+    for (uint32_t by = 0; by * 4u < h; by++) {
+        for (uint32_t bx = 0; bx < l->blocks_x[p]; bx++) {
+            bc4_values(plane + ((size_t)by * l->blocks_x[p] + bx) * block_bytes + offset, v);
+            for (int y = 0; y < 4; y++)
+                memcpy(row + (size_t)y * l->pixels_x[p] + bx * 4u, v + 4 * y, 4);
+        }
+        for (uint32_t y = 0; y < 4 && by * 4u + y < h; y++)
+            fwrite(row + (size_t)y * l->pixels_x[p], 1, w, f);
+    }
+    free(row);
+}
+
+/* HQ only: the decoded sample planes, cropped like a planar 4:2:0 picture: Y (W x H), Co, Cg
+ * (ceil(W/2) x ceil(H/2)), then alpha (W x H) for YG10. */
+static int cmd_dump_samples(int argc, char **argv)
+{
+    dxvk_mov *mov;
+    frame_buffers b;
+    dxvk_frame_layout l;
+    dxvk_status st;
+    FILE *f;
+    uint32_t w, h, cw, ch;
+    if (argc < 3)
+        return 2;
+    memset(&b, 0, sizeof b);
+    if (!open_or_report(argv[0], &mov))
+        return 1;
+    st = decode_frame(mov, (uint32_t)strtoul(argv[1], NULL, 10), NULL, &b, &l, NULL, NULL);
+    if (st != DXVK_OK || l.plane_count != 2) {
+        fprintf(stderr, "%s: %s\n", argv[0], st != DXVK_OK ? dxvk_status_string(st) : "not HQ");
+        return 1;
+    }
+    w = l.display_width, h = l.display_height, cw = (w + 1u) / 2u, ch = (h + 1u) / 2u;
+    f = fopen(argv[2], "wb");
+    if (!f)
+        return 1;
+    write_samples(f, b.plane[0], &l, 0, l.format[0] == DXVK_BLOCKS_BC5 ? 16u : 8u, 0, w, h);
+    write_samples(f, b.plane[1], &l, 1, 16u, 0, cw, ch);
+    write_samples(f, b.plane[1], &l, 1, 16u, 8, cw, ch);
+    if (l.format[0] == DXVK_BLOCKS_BC5)
+        write_samples(f, b.plane[0], &l, 0, 16u, 8, w, h);
+    fclose(f);
+    printf("%s: Y %ux%u, Co + Cg %ux%u%s\n", argv[2], w, h, cw, ch,
+           l.format[0] == DXVK_BLOCKS_BC5 ? ", A" : "");
+    buffers_free(&b);
+    dxvk_mov_close(mov);
+    return 0;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Encoder commands                                                                               */
+/* ---------------------------------------------------------------------------------------------- */
+
+static const char *opt_value(int argc, char **argv, const char *name)
+{
+    for (int a = 0; a + 1 < argc; a++)
+        if (strcmp(argv[a], name) == 0)
+            return argv[a + 1];
+    return NULL;
+}
+
+static int opt_flag(int argc, char **argv, const char *name)
+{
+    for (int a = 0; a < argc; a++)
+        if (strcmp(argv[a], name) == 0)
+            return 1;
+    return 0;
+}
+
+/* Options taking a value (skipped when collecting positional arguments). */
+static int takes_value(const char *s)
+{
+    static const char *const names[] = {"--variant", "--effort", "--size",   "--fps",
+                                        "--threads", "--opcodes", "--frames", "--seconds"};
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
+        if (strcmp(s, names[i]) == 0)
+            return 1;
+    return 0;
+}
+
+static int parse_size(const char *s, uint32_t *w, uint32_t *h)
+{
+    char *e;
+    if (!s)
+        return 0;
+    *w = (uint32_t)strtoul(s, &e, 10);
+    if (*e != 'x')
+        return 0;
+    *h = (uint32_t)strtoul(e + 1, NULL, 10);
+    return *w > 0 && *h > 0;
+}
+
+static int parse_variant(const char *s, dxvk_variant *v)
+{
+    if (!s || strcasecmp(s, "dxt1") == 0)
+        *v = DXVK_VARIANT_DXT1;
+    else if (strcasecmp(s, "dxt5") == 0)
+        *v = DXVK_VARIANT_DXT5;
+    else if (strcasecmp(s, "ycg6") == 0)
+        *v = DXVK_VARIANT_YCG6;
+    else if (strcasecmp(s, "yg10") == 0)
+        *v = DXVK_VARIANT_YG10;
+    else
+        return 0;
+    return 1;
+}
+
+static int parse_encode_options(int argc, char **argv, dxvk_variant *variant,
+                                dxvk_encode_options *eo)
+{
+    const char *effort = opt_value(argc, argv, "--effort"), *ops = opt_value(argc, argv, "--opcodes");
+    memset(eo, 0, sizeof *eo);
+    if (!parse_variant(opt_value(argc, argv, "--variant"), variant)) {
+        fprintf(stderr, "--variant: dxt1, dxt5, ycg6 or yg10\n");
+        return 0;
+    }
+    if (effort && strcmp(effort, "best") == 0)
+        eo->effort = DXVK_EFFORT_BEST;
+    else if (effort && strcmp(effort, "fast") != 0) {
+        fprintf(stderr, "--effort: fast or best\n");
+        return 0;
+    }
+    if (ops && strcmp(ops, "stored") == 0)
+        eo->opcodes = DXVK_OPCODES_STORED;
+    else if (ops && strcmp(ops, "auto") != 0) {
+        fprintf(stderr, "--opcodes: auto or stored\n");
+        return 0;
+    }
+    if (opt_flag(argc, argv, "--premultiplied"))
+        eo->flags |= DXVK_ENC_PREMULTIPLIED_INPUT;
+    if (opt_flag(argc, argv, "--stored-payload"))
+        eo->flags |= DXVK_ENC_STORED_PAYLOAD;
+    return 1;
+}
+
+/* "30", "29.97", "30000/1001" -> timescale / frame duration. */
+static int parse_fps(const char *s, uint32_t *timescale, uint32_t *duration)
+{
+    double f;
+    const char *slash;
+    if (!s) {
+        *timescale = 30000;
+        *duration = 1000;
+        return 1;
+    }
+    if ((slash = strchr(s, '/')) != NULL) {
+        *timescale = (uint32_t)strtoul(s, NULL, 10);
+        *duration = (uint32_t)strtoul(slash + 1, NULL, 10);
+        return *timescale > 0 && *duration > 0;
+    }
+    f = atof(s);
+    if (f <= 0)
+        return 0;
+    if (fabs(f - 29.97) < 0.005 || fabs(f - 23.976) < 0.005 || fabs(f - 59.94) < 0.005 ||
+        fabs(f - 47.952) < 0.005 || fabs(f - 119.88) < 0.005) {
+        *timescale = (uint32_t)(f * 1001.0 / 1000.0 + 0.5) * 1000u;
+        *duration = 1001;
+    } else {
+        *timescale = (uint32_t)(f * 1000.0 + 0.5);
+        *duration = 1000;
+    }
+    return 1;
+}
+
+/* Reads exactly n bytes from f; returns 0 at a clean end of file, -1 on a partial frame. */
+static int read_frame(FILE *f, uint8_t *p, size_t n)
+{
+    size_t got = fread(p, 1, n, f);
+    if (got == n)
+        return 1;
+    return got == 0 ? 0 : -1;
+}
+
+static int cmd_encode(int argc, char **argv)
+{
+    const char *inputs[4096], *out_path = NULL;
+    int ninputs = 0, threads = 1, raw = 0, rc = 1;
+    uint32_t w = 0, h = 0, timescale, duration, frames = 0, max_frames = UINT32_MAX;
+    dxvk_variant variant;
+    dxvk_encode_options eo;
+    dxvk_encoder *enc = NULL;
+    dxvk_mov_writer *mw = NULL;
+    dxvk_jobs jobs;
+    pool *pl = NULL;
+    uint8_t *rgba = NULL, *packet = NULL;
+    size_t cap, n, total = 0, largest = 0;
+    FILE *rf = NULL;
+    double t_enc = 0, t0;
+    char err[256];
+    dxvk_status st;
+
+    for (int a = 0; a < argc; a++) {
+        if (takes_value(argv[a])) {
+            a++;
+            continue;
+        }
+        if (argv[a][0] == '-' && argv[a][1] == '-')
+            continue;
+        if (ninputs < 4096)
+            inputs[ninputs++] = argv[a];
+    }
+    if (ninputs < 2) {
+        fprintf(stderr, "encode: need at least one input and the output .mov\n");
+        return 2;
+    }
+    out_path = inputs[--ninputs];
+    if (!parse_encode_options(argc, argv, &variant, &eo) ||
+        !parse_fps(opt_value(argc, argv, "--fps"), &timescale, &duration))
+        return 2;
+    if (opt_value(argc, argv, "--threads"))
+        threads = atoi(opt_value(argc, argv, "--threads"));
+    if (opt_value(argc, argv, "--frames"))
+        max_frames = (uint32_t)strtoul(opt_value(argc, argv, "--frames"), NULL, 10);
+    if (threads > 1) {
+        pl = pool_create(threads);
+        jobs.run = pool_run;
+        jobs.user = pl;
+        eo.jobs = &jobs;
+    }
+    {
+        const char *in0 = inputs[0];
+        size_t l = strlen(in0);
+        raw = strcmp(in0, "-") == 0 || (l > 5 && strcmp(in0 + l - 5, ".rgba") == 0) ||
+              (l > 4 && strcmp(in0 + l - 4, ".raw") == 0);
+    }
+    if (raw) {
+        if (!parse_size(opt_value(argc, argv, "--size"), &w, &h)) {
+            fprintf(stderr, "encode: raw RGBA input needs --size WxH\n");
+            goto done;
+        }
+        rf = strcmp(inputs[0], "-") == 0 ? stdin : fopen(inputs[0], "rb");
+        if (!rf) {
+            fprintf(stderr, "cannot open %s\n", inputs[0]);
+            goto done;
+        }
+        rgba = (uint8_t *)malloc((size_t)w * h * 4u);
+    } else {
+        rgba = image_load(inputs[0], &w, &h, err, sizeof err);
+        if (!rgba) {
+            fprintf(stderr, "%s\n", err);
+            goto done;
+        }
+    }
+    if ((st = dxvk_encoder_create(variant, w, h, &eo, &enc)) != DXVK_OK ||
+        (st = dxvk_mov_writer_open_file(out_path, w, h, timescale, duration, &mw)) != DXVK_OK) {
+        fprintf(stderr, "encode: %s\n", dxvk_status_string(st));
+        goto done;
+    }
+    cap = dxvk_encode_bound(variant, w, h);
+    packet = (uint8_t *)malloc(cap);
+    if (!rgba || !packet) {
+        fprintf(stderr, "out of memory\n");
+        goto done;
+    }
+    for (int i = 0; frames < max_frames; i++) {
+        if (raw) {
+            int r = read_frame(rf, rgba, (size_t)w * h * 4u);
+            if (r < 0)
+                fprintf(stderr, "warning: partial frame at the end of %s ignored\n", inputs[0]);
+            if (r <= 0)
+                break;
+        } else {
+            uint32_t iw, ih;
+            if (i >= ninputs)
+                break;
+            if (i > 0) {
+                free(rgba);
+                rgba = image_load(inputs[i], &iw, &ih, err, sizeof err);
+                if (!rgba) {
+                    fprintf(stderr, "%s\n", err);
+                    goto done;
+                }
+                if (iw != w || ih != h) {
+                    fprintf(stderr, "%s: %ux%u, expected %ux%u\n", inputs[i], iw, ih, w, h);
+                    goto done;
+                }
+            }
+        }
+        t0 = now_seconds();
+        st = dxvk_encoder_encode(enc, rgba, (size_t)w * 4u, packet, cap, &n);
+        t_enc += now_seconds() - t0;
+        if (st == DXVK_OK)
+            st = dxvk_mov_writer_add(mw, packet, n);
+        if (st != DXVK_OK) {
+            fprintf(stderr, "frame %u: %s\n", frames, dxvk_status_string(st));
+            goto done;
+        }
+        total += n;
+        if (n > largest)
+            largest = n;
+        frames++;
+    }
+    if (frames == 0 || (st = dxvk_mov_writer_finish(mw)) != DXVK_OK) {
+        fprintf(stderr, "encode: %s\n", frames ? dxvk_status_string(st) : "no frames");
+        goto done;
+    }
+    printf("%s: %s %ux%u, %u frames, %.4g fps (%u/%u), effort %s, opcodes %s | packets %zu bytes "
+           "(mean %.0f, max %zu) | encode %.2f ms/frame (%d thread%s)\n",
+           out_path, dxvk_variant_name(variant), w, h, frames, (double)timescale / duration,
+           timescale, duration, eo.effort == DXVK_EFFORT_BEST ? "best" : "fast",
+           eo.opcodes == DXVK_OPCODES_STORED ? "stored" : "auto", total, (double)total / frames,
+           largest, t_enc * 1000.0 / frames, threads, threads == 1 ? "" : "s");
+    rc = 0;
+done:
+    if (rf && rf != stdin)
+        fclose(rf);
+    dxvk_mov_writer_close(mw);
+    dxvk_encoder_destroy(enc);
+    free(rgba);
+    free(packet);
+    pool_destroy(pl);
+    return rc;
+}
+
+static int cmd_bench_encode(int argc, char **argv)
+{
+    uint32_t w, h, nframes = 0, max_frames = 30;
+    int threads = 1;
+    double seconds = 3.0, t0, el;
+    dxvk_variant variant;
+    dxvk_encode_options eo;
+    dxvk_encoder *enc;
+    dxvk_jobs jobs;
+    pool *pl = NULL;
+    uint8_t *frames, *packet;
+    size_t fbytes, cap, n, bytes = 0;
+    unsigned long long iters = 0;
+    FILE *f;
+    if (argc < 1 || !parse_size(opt_value(argc, argv, "--size"), &w, &h) ||
+        !parse_encode_options(argc, argv, &variant, &eo))
+        return 2;
+    if (opt_value(argc, argv, "--threads"))
+        threads = atoi(opt_value(argc, argv, "--threads"));
+    if (opt_value(argc, argv, "--frames"))
+        max_frames = (uint32_t)strtoul(opt_value(argc, argv, "--frames"), NULL, 10);
+    if (opt_value(argc, argv, "--seconds"))
+        seconds = atof(opt_value(argc, argv, "--seconds"));
+    if (threads > 1) {
+        pl = pool_create(threads);
+        jobs.run = pool_run;
+        jobs.user = pl;
+        eo.jobs = &jobs;
+    }
+    fbytes = (size_t)w * h * 4u;
+    frames = (uint8_t *)malloc(fbytes * max_frames);
+    f = fopen(argv[0], "rb");
+    if (!f || !frames) {
+        fprintf(stderr, "cannot read %s\n", argv[0]);
+        return 1;
+    }
+    while (nframes < max_frames && read_frame(f, frames + fbytes * nframes, fbytes) == 1)
+        nframes++;
+    fclose(f);
+    if (nframes == 0 || dxvk_encoder_create(variant, w, h, &eo, &enc) != DXVK_OK)
+        return 1;
+    cap = dxvk_encode_bound(variant, w, h);
+    packet = (uint8_t *)malloc(cap);
+    dxvk_encoder_encode(enc, frames, (size_t)w * 4u, packet, cap, &n); /* warm up */
+    t0 = now_seconds();
+    do {
+        for (uint32_t i = 0; i < nframes; i++) {
+            if (dxvk_encoder_encode(enc, frames + fbytes * i, (size_t)w * 4u, packet, cap, &n) !=
+                DXVK_OK)
+                return 1;
+            bytes += n;
+            iters++;
+        }
+    } while (now_seconds() - t0 < seconds);
+    el = now_seconds() - t0;
+    printf("%s %ux%u effort %s threads %d frames %u: %.2f ms/frame, %.1f fps, mean packet %.0f B\n",
+           dxvk_variant_name(variant), w, h, eo.effort == DXVK_EFFORT_BEST ? "best" : "fast",
+           threads, nframes, el * 1000.0 / (double)iters, (double)iters / el,
+           (double)bytes / (double)iters);
+    dxvk_encoder_destroy(enc);
+    free(frames);
+    free(packet);
+    pool_destroy(pl);
+    return 0;
+}
+
+static double psnr_of(double sse, double count)
+{
+    if (sse <= 0)
+        return 99.0;
+    return 10.0 * log10(255.0 * 255.0 * count / sse);
+}
+
+static int cmd_psnr(int argc, char **argv)
+{
+    dxvk_mov *mov;
+    const dxvk_mov_info *in;
+    frame_buffers b;
+    dxvk_frame_layout l;
+    dxvk_options opt;
+    uint8_t *src;
+    size_t fbytes;
+    uint32_t max_frames = UINT32_MAX;
+    double sum_rgb = 0, sum_a = 0;
+    int frames = 0, alpha = 0;
+    FILE *f;
+    if (argc < 2)
+        return 2;
+    if (opt_value(argc, argv, "--frames"))
+        max_frames = (uint32_t)strtoul(opt_value(argc, argv, "--frames"), NULL, 10);
+    if (!open_or_report(argv[0], &mov))
+        return 1;
+    in = dxvk_mov_get_info(mov);
+    fbytes = (size_t)in->width * in->height * 4u;
+    src = (uint8_t *)malloc(fbytes);
+    f = fopen(argv[1], "rb");
+    if (!f || !src) {
+        fprintf(stderr, "cannot read %s\n", argv[1]);
+        return 1;
+    }
+    memset(&b, 0, sizeof b);
+    memset(&opt, 0, sizeof opt);
+    for (uint32_t i = 0; i < in->frame_count && i < max_frames; i++) {
+        double sse[4] = {0, 0, 0, 0};
+        int maxe[4] = {0, 0, 0, 0};
+        dxvk_status st;
+        if (read_frame(f, src, fbytes) != 1)
+            break;
+        st = decode_frame(mov, i, &opt, &b, &l, NULL, NULL);
+        if (st == DXVK_OK)
+            st = to_rgba(&l, &opt, &b);
+        if (st != DXVK_OK) {
+            fprintf(stderr, "frame %u: %s\n", i, dxvk_status_string(st));
+            return 1;
+        }
+        alpha = dxvk_variant_has_alpha(l.variant);
+        for (size_t k = 0; k < fbytes; k++) {
+            int d = (int)b.rgba[k] - (int)src[k];
+            if (d < 0)
+                d = -d;
+            sse[k & 3u] += (double)d * d;
+            if (d > maxe[k & 3u])
+                maxe[k & 3u] = d;
+        }
+        {
+            double px = (double)in->width * in->height;
+            double p_rgb = psnr_of(sse[0] + sse[1] + sse[2], 3.0 * px), p_a = psnr_of(sse[3], px);
+            printf("frame %u: PSNR RGB %.3f dB (R %.2f G %.2f B %.2f) max err %d/%d/%d", i, p_rgb,
+                   psnr_of(sse[0], px), psnr_of(sse[1], px), psnr_of(sse[2], px), maxe[0], maxe[1],
+                   maxe[2]);
+            if (alpha)
+                printf(" | A %.3f dB max err %d", p_a, maxe[3]);
+            printf("\n");
+            sum_rgb += p_rgb;
+            sum_a += p_a;
+        }
+        frames++;
+    }
+    if (frames)
+        printf("%s: %s %d frames, mean PSNR RGB %.3f dB%s", argv[0], dxvk_variant_name(l.variant),
+               frames, sum_rgb / frames, alpha ? "" : "\n");
+    if (frames && alpha)
+        printf(", alpha %.3f dB\n", sum_a / frames);
+    fclose(f);
+    free(src);
+    buffers_free(&b);
+    dxvk_mov_close(mov);
+    return frames ? 0 : 1;
+}
+
+static int cmd_cmp_rgba(int argc, char **argv)
+{
+    uint32_t w, h;
+    size_t n, hist[4] = {0, 0, 0, 0}, differ = 0;
+    int maxd[4] = {0, 0, 0, 0};
+    uint8_t *a, *b;
+    FILE *fa, *fb;
+    if (argc < 3 || !parse_size(opt_value(argc, argv, "--size"), &w, &h))
+        return 2;
+    n = (size_t)w * h * 4u;
+    a = (uint8_t *)malloc(n);
+    b = (uint8_t *)malloc(n);
+    fa = fopen(argv[0], "rb");
+    fb = fopen(argv[1], "rb");
+    if (!fa || !fb || read_frame(fa, a, n) != 1 || read_frame(fb, b, n) != 1) {
+        fprintf(stderr, "cannot read two %ux%u RGBA frames\n", w, h);
+        return 1;
+    }
+    if (opt_flag(argc, argv, "--unpremultiply-b")) {
+        /* B's colour divided by its alpha (floor(c x 255 / a), clamped; alpha 0 and 255 untouched):
+         * the conversion FFmpeg's DXT5 output was measured to apply (black box, QUESTIONS 11) */
+        for (size_t k = 0; k < n; k += 4) {
+            unsigned al = b[k + 3];
+            if (al == 0 || al == 255)
+                continue;
+            for (int c = 0; c < 3; c++) {
+                unsigned v = b[k + (size_t)c] * 255u / al;
+                b[k + (size_t)c] = (uint8_t)(v > 255u ? 255u : v);
+            }
+        }
+    }
+    for (size_t k = 0; k < n; k++) {
+        int d = (int)a[k] - (int)b[k];
+        if (d < 0)
+            d = -d;
+        if (d) {
+            differ++;
+            hist[d == 1 ? 1 : d == 2 ? 2 : 3]++;
+        }
+        if (d > maxd[k & 3u])
+            maxd[k & 3u] = d;
+    }
+    printf("%ux%u: %zu of %zu bytes differ (|d|=1: %zu, 2: %zu, >2: %zu) | max |d| R %d G %d B %d A %d\n",
+           w, h, differ, n, hist[1], hist[2], hist[3], maxd[0], maxd[1], maxd[2], maxd[3]);
+    fclose(fa);
+    fclose(fb);
+    free(a);
+    free(b);
+    return 0;
+}
+
+/* Decodes every packet of FILE and re-packs the same block streams with DXVKit's packer (the
+ * blocks-in path) into OUT.mov: a like-for-like comparison of the lossless layer. */
+static int cmd_repack(int argc, char **argv)
+{
+    dxvk_mov *mov;
+    const dxvk_mov_info *in;
+    dxvk_encoder *enc = NULL;
+    dxvk_mov_writer *mw = NULL;
+    dxvk_encode_options eo;
+    dxvk_variant variant;
+    frame_buffers b;
+    dxvk_frame_layout l;
+    uint8_t *packet = NULL;
+    size_t cap, n, in_total = 0, out_total = 0, psize;
+    int rc = 1, same = 1;
+    dxvk_status st;
+    if (argc < 2)
+        return 2;
+    memset(&b, 0, sizeof b);
+    if (!parse_encode_options(argc, argv, &variant, &eo) || !open_or_report(argv[0], &mov))
+        return 2;
+    in = dxvk_mov_get_info(mov);
+    for (uint32_t i = 0; i < in->frame_count; i++) {
+        const void *planes[2];
+        uint8_t *back[2] = {NULL, NULL};
+        if ((st = decode_frame(mov, i, NULL, &b, &l, NULL, &psize)) != DXVK_OK) {
+            fprintf(stderr, "frame %u: %s\n", i, dxvk_status_string(st));
+            goto done;
+        }
+        if (!enc) {
+            if ((st = dxvk_encoder_create(l.variant, in->width, in->height, &eo, &enc)) != DXVK_OK ||
+                (st = dxvk_mov_writer_open_file(argv[1], in->width, in->height, in->timescale,
+                                                in->frame_duration ? in->frame_duration : 1,
+                                                &mw)) != DXVK_OK) {
+                fprintf(stderr, "repack: %s\n", dxvk_status_string(st));
+                goto done;
+            }
+            cap = dxvk_encode_bound(l.variant, in->width, in->height);
+            packet = (uint8_t *)malloc(cap);
+        }
+        planes[0] = b.plane[0];
+        planes[1] = b.plane[1];
+        if ((st = dxvk_encoder_pack(enc, planes, packet, cap, &n)) != DXVK_OK ||
+            (st = dxvk_mov_writer_add(mw, packet, n)) != DXVK_OK) {
+            fprintf(stderr, "frame %u: %s\n", i, dxvk_status_string(st));
+            goto done;
+        }
+        /* the repacked packet must decode to the same blocks */
+        for (int p = 0; p < l.plane_count; p++) {
+            back[p] = (uint8_t *)malloc(l.bytes[p]);
+        }
+        {
+            void *bp[2] = {back[0], back[1]};
+            dxvk_frame_layout l2;
+            st = dxvk_decode_blocks(DXVK_GEN_DXV3, packet, n, in->width, in->height, NULL, bp,
+                                    l.bytes, &l2, NULL);
+            for (int p = 0; p < l.plane_count; p++)
+                if (st != DXVK_OK || memcmp(back[p], b.plane[p], l.bytes[p]) != 0)
+                    same = 0;
+        }
+        free(back[0]);
+        free(back[1]);
+        printf("frame %u: %s %zu -> %zu bytes (%+.2f %%)\n", i, dxvk_variant_name(l.variant), psize,
+               n, 100.0 * ((double)n - (double)psize) / (double)psize);
+        in_total += psize;
+        out_total += n;
+    }
+    if (!mw || dxvk_mov_writer_finish(mw) != DXVK_OK)
+        goto done;
+    printf("%s -> %s: %zu -> %zu bytes (%+.2f %%), blocks identical after repack: %s\n", argv[0],
+           argv[1], in_total, out_total,
+           100.0 * ((double)out_total - (double)in_total) / (double)in_total, same ? "yes" : "NO");
+    rc = same ? 0 : 1;
+done:
+    dxvk_mov_writer_close(mw);
+    dxvk_encoder_destroy(enc);
+    free(packet);
+    buffers_free(&b);
+    dxvk_mov_close(mov);
+    return rc;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
@@ -777,8 +1422,17 @@ static void usage(void)
             "  dxvtool dump-blocks FILE FRAME OUTPREFIX\n"
             "  dxvtool dump-rgba FILE FRAME OUT.rgba [--premultiply]\n"
             "  dxvtool verify VECTORS.TSV [--threads N]\n"
-            "  dxvtool check FILE... [--threads N]\n"
+            "  dxvtool check FILE... [--threads N] [--histogram]\n"
             "  dxvtool bench FILE [--threads N] [--seconds S] [--frames N]\n"
+            "  dxvtool encode IN... OUT.mov [--variant dxt1|dxt5|ycg6|yg10] [--effort fast|best]\n"
+            "         [--size WxH (raw input)] [--fps 30|29.97|N/D] [--threads N] [--frames N]\n"
+            "         [--opcodes auto|stored] [--premultiplied] [--stored-payload]\n"
+            "         IN = PNG / PAM / PPM files, or one raw RGBA file / '-' (stdin) with --size\n"
+            "  dxvtool bench-encode SOURCE.rgba --size WxH [--variant V] [--effort E] [--threads N]\n"
+            "  dxvtool repack FILE.mov OUT.mov [--effort fast|best] [--opcodes auto|stored]\n"
+            "  dxvtool psnr FILE.mov SOURCE.rgba [--frames N]\n"
+            "  dxvtool cmp-rgba A.rgba B.rgba --size WxH [--unpremultiply-b]\n"
+            "  dxvtool dump-samples FILE FRAME OUT   (HQ: Y, Co, Cg [, A] planes, 4:2:0 crop)\n"
             "  (--threads 0 = all cores)\n");
 }
 
@@ -803,6 +1457,18 @@ int main(int argc, char **argv)
         rc = cmd_check(argc - 2, argv + 2);
     else if (argc >= 3 && strcmp(argv[1], "bench") == 0)
         rc = cmd_bench(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "encode") == 0)
+        rc = cmd_encode(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "bench-encode") == 0)
+        rc = cmd_bench_encode(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "repack") == 0)
+        rc = cmd_repack(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "psnr") == 0)
+        rc = cmd_psnr(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "dump-samples") == 0)
+        rc = cmd_dump_samples(argc - 2, argv + 2);
+    else if (argc >= 3 && strcmp(argv[1], "cmp-rgba") == 0)
+        rc = cmd_cmp_rgba(argc - 2, argv + 2);
     if (rc == 2)
         usage();
     return rc;

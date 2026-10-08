@@ -66,6 +66,42 @@ int main(int argc, char **argv)
             }
         }
     }
+    // Encoder + MovWriter: encode the decoded RGBA of a Resolume YG10 frame, write, read back, decode.
+    {
+        dxvk::Movie src;
+        dxvk::Frame f;
+        if (src.open((dir + "/streams/resolume/resolume-alley_yg10_testsrc2_1920x1080.mov").c_str()) != DXVK_OK ||
+            src.decode(0, f) != DXVK_OK) {
+            std::fprintf(stderr, "encoder test: cannot decode the source\n");
+            return 1;
+        }
+        const auto &l = f.layout();
+        std::vector<uint8_t> rgba(size_t(l.display_width) * l.display_height * 4), packet;
+        f.to_rgba(rgba.data(), l.display_width * 4);
+        dxvk_encode_options eo{0, DXVK_EFFORT_FAST, DXVK_OPCODES_AUTO, &jobs};
+        dxvk::Encoder enc;
+        dxvk::Encoder moved_enc;
+        bool ok = enc.create(DXVK_VARIANT_YG10, l.display_width, l.display_height, &eo) == DXVK_OK;
+        moved_enc = std::move(enc);
+        ok = ok && moved_enc.encode(rgba.data(), l.display_width * 4, packet) == DXVK_OK;
+        dxvk::Frame back;
+        ok = ok && back.decode(DXVK_GEN_DXV3, packet.data(), packet.size(), l.display_width,
+                               l.display_height) == DXVK_OK;
+        for (int p = 0; ok && p < 2; p++)
+            ok = std::memcmp(back.plane(p), moved_enc.plane(p), back.plane_bytes(p)) == 0;
+        std::string out = std::string(argc > 2 ? argv[2] : ".") + "/cpp_wrapper_test.mov";
+        dxvk::MovWriter mw;
+        ok = ok && mw.open(out.c_str(), l.display_width, l.display_height, 30000, 1001) == DXVK_OK &&
+             mw.add(packet) == DXVK_OK && mw.finish() == DXVK_OK;
+        mw.close();
+        dxvk::Movie again;
+        std::vector<uint8_t> read;
+        ok = ok && again.open(out.c_str()) == DXVK_OK && again.read_packet(0, read) == DXVK_OK &&
+             read == packet;
+        std::printf("cpp encoder + mov writer: %s (packet %zu bytes)\n", ok ? "ok" : "FAIL", packet.size());
+        if (!ok)
+            failures++;
+    }
     std::printf("cpp wrapper: %d frames, %d failures\n", frames, failures);
     return failures ? 1 : 0;
 }

@@ -1,5 +1,5 @@
 /*
- * DXVKit: a clean-room decoder for Resolume's DXV video codec.
+ * DXVKit: a clean-room decoder and encoder for Resolume's DXV video codec.
  *
  * MIT License. Copyright (c) 2026 Amrit Rosell. See LICENSE.
  */
@@ -225,6 +225,116 @@ dxvk_status dxvk_mov_packet_location(const dxvk_mov *mov, uint32_t index, uint64
  * dxvk_mov object. */
 dxvk_status dxvk_mov_read_packet(dxvk_mov *mov, uint32_t index, void *buffer, size_t capacity,
                                  size_t *size);
+
+/* ------------------------------------------------------------------------------------------------ */
+/* Encoder                                                                                          */
+/* ------------------------------------------------------------------------------------------------ */
+
+/*
+ * Effort: how hard the BCn block search and the match / opcode search work.
+ *   FAST  live / batch: principal-axis BC1 with one refit, min / max BC4, single-entry match tables,
+ *         one opcode pass with a fixed opcode-cost prior.
+ *   BEST  archive: iterated BC1 refits + endpoint search (+ three-colour mode for DXT1), BC4 endpoint
+ *         search in both modes, larger match tables, two opcode passes with measured opcode costs.
+ */
+typedef enum dxvk_effort {
+    DXVK_EFFORT_FAST = 0,
+    DXVK_EFFORT_BEST = 1
+} dxvk_effort;
+
+/* HQ opcode-stream coding. AUTO: per stream the smallest of FSE / stored / fill (what Resolume does).
+ * STORED: stored / fill only (no entropy coding; larger, simpler). */
+typedef enum dxvk_opcode_coding {
+    DXVK_OPCODES_AUTO = 0,
+    DXVK_OPCODES_STORED = 1
+} dxvk_opcode_coding;
+
+/* The input colour is premultiplied by alpha and is written as such. Without it the input is straight
+ * (unpremultiplied) colour and is written straight, like Resolume Alley. The encoder never converts
+ * between the two and the file has no field for the convention, so the packet bytes are the same
+ * either way: the flag records which convention the caller's file carries (see the spec, 8.5). */
+#define DXVK_ENC_PREMULTIPLIED_INPUT 0x1u
+/* DXT1 / DXT5 only: write stored-flag packets (payload = the raw block stream). Valid per the format but
+ * never seen in a real file; off by default. Rejected for YCG6 / YG10 (undefined there). */
+#define DXVK_ENC_STORED_PAYLOAD 0x2u
+
+/* Encoder options. A zeroed struct (or NULL) = defaults: FAST, AUTO, straight input, single thread. */
+typedef struct dxvk_encode_options {
+    uint32_t flags;               /* DXVK_ENC_* */
+    dxvk_effort effort;
+    dxvk_opcode_coding opcodes;
+    const dxvk_jobs *jobs;        /* NULL = single-threaded; output is identical either way */
+} dxvk_encode_options;
+
+typedef struct dxvk_encoder dxvk_encoder;
+
+/* Largest packet the encoder can produce for a variant and display size (0 on bad arguments). */
+size_t dxvk_encode_bound(dxvk_variant variant, uint32_t width, uint32_t height);
+
+/*
+ * Creates an encoder for one DXV3 variant (DXT1, DXT5, YCG6, YG10) and display size. All memory the
+ * encoder needs is allocated here; encoding a frame allocates nothing. The options are copied (the jobs
+ * runner pointer must stay valid). One thread at a time per encoder object.
+ */
+dxvk_status dxvk_encoder_create(dxvk_variant variant, uint32_t width, uint32_t height,
+                                const dxvk_encode_options *options, dxvk_encoder **encoder);
+void dxvk_encoder_destroy(dxvk_encoder *encoder);
+
+/* The block-stream layout this encoder reads / writes (the same as dxvk_decode_blocks produces). */
+const dxvk_frame_layout *dxvk_encoder_layout(const dxvk_encoder *encoder);
+
+/*
+ * RGBA8 (display size, rows top first, stride bytes per row) -> block planes in the decoder's layout
+ * (plane 0 / plane 1 of dxvk_encoder_layout), padded to the coded size by edge replication.
+ * DXT1 ignores alpha. YCG6 / YG10 apply the forward YCoCg transform and 2 x 2 chroma averaging.
+ */
+dxvk_status dxvk_encoder_compress(dxvk_encoder *encoder, const uint8_t *rgba, size_t stride,
+                                  void *const planes[2], const size_t plane_capacity[2]);
+
+/*
+ * Blocks-in path: block planes (any BCn encoder's output, in dxvk_encoder_layout's layout) -> one DXV3
+ * packet. Lossless: decoding the packet returns exactly these planes. *packet_size = bytes written.
+ */
+dxvk_status dxvk_encoder_pack(dxvk_encoder *encoder, const void *const planes[2], void *packet,
+                              size_t capacity, size_t *packet_size);
+
+/* RGBA8 -> packet: dxvk_encoder_compress into the encoder's own planes, then dxvk_encoder_pack. */
+dxvk_status dxvk_encoder_encode(dxvk_encoder *encoder, const uint8_t *rgba, size_t stride,
+                                void *packet, size_t capacity, size_t *packet_size);
+
+/* The planes of the last dxvk_encoder_encode (what was packed), or NULL before the first one. */
+const void *dxvk_encoder_plane(const dxvk_encoder *encoder, int plane);
+
+/* ------------------------------------------------------------------------------------------------ */
+/* QuickTime writer (video only)                                                                    */
+/* ------------------------------------------------------------------------------------------------ */
+
+typedef struct dxvk_mov_writer dxvk_mov_writer;
+
+/* Random-access sink: write_at returns the number of bytes written (fewer = error). */
+typedef struct dxvk_sink {
+    size_t (*write_at)(void *user, uint64_t offset, const void *data, size_t size);
+    void *user;
+    void (*close)(void *user);  /* optional; called by dxvk_mov_writer_close */
+} dxvk_sink;
+
+/*
+ * Starts a .mov with one DXV3 ('DXD3') video track of the given display size. Frame rate =
+ * timescale / frame_duration (e.g. 30000 / 1001). Packets are appended as they come; finish writes the
+ * sample tables. Allocation: the sample-size / offset tables grow while packets are added.
+ */
+dxvk_status dxvk_mov_writer_open_file(const char *path, uint32_t width, uint32_t height,
+                                      uint32_t timescale, uint32_t frame_duration,
+                                      dxvk_mov_writer **writer);
+dxvk_status dxvk_mov_writer_open_sink(const dxvk_sink *sink, uint32_t width, uint32_t height,
+                                      uint32_t timescale, uint32_t frame_duration,
+                                      dxvk_mov_writer **writer);
+/* Appends one packet (one frame). Every packet of a file must have the same variant. */
+dxvk_status dxvk_mov_writer_add(dxvk_mov_writer *writer, const void *packet, size_t size);
+/* Writes the movie header and sample tables. The file is complete after this returns DXVK_OK. */
+dxvk_status dxvk_mov_writer_finish(dxvk_mov_writer *writer);
+/* Releases the writer (and closes the file / sink). Without finish the file is incomplete. */
+void dxvk_mov_writer_close(dxvk_mov_writer *writer);
 
 #ifdef __cplusplus
 }

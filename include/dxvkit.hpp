@@ -1,5 +1,5 @@
 /*
- * DXVKit C++ wrapper: header-only RAII over dxvkit.h. No exceptions (every call returns a
+ * DXVKit C++ wrapper: header-only RAII over dxvkit.h (decoder, encoder, MOV writer). No exceptions (every call returns a
  * dxvk_status), so it fits plugin code that is built without them.
  *
  *   dxvk::Movie movie;
@@ -7,6 +7,12 @@
  *   dxvk::Frame frame;                       // reusable; grows once, then no allocation
  *   movie.decode(n, frame);                  // block streams: frame.plane(0), frame.plane(1)
  *   frame.to_rgba(rgba, stride);             // optional CPU conversion
+ *
+ *   dxvk::Encoder enc;                       // encoder: RGBA8 or block planes -> DXV3 packet
+ *   enc.create(DXVK_VARIANT_YCG6, 1920, 1080, &options);
+ *   enc.encode(rgba, stride, packet);        // packet: std::vector<uint8_t>, resized to fit
+ *   dxvk::MovWriter mov;                     // .mov with one DXD3 video track
+ *   mov.open("out.mov", 1920, 1080, 30000, 1001); mov.add(packet); mov.finish();
  *
  * MIT License. Copyright (c) 2026 Amrit Rosell. See LICENSE.
  */
@@ -125,6 +131,121 @@ public:
 private:
     dxvk_mov *mov_ = nullptr;
     std::vector<uint8_t> packet_;
+};
+
+/* DXV3 encoder for one variant and frame size. Move-only; destroys on destruction. One thread at a time
+ * per Encoder (use the options' jobs runner for parallelism inside a frame). */
+class Encoder {
+public:
+    Encoder() = default;
+    ~Encoder() { reset(); }
+    Encoder(const Encoder &) = delete;
+    Encoder &operator=(const Encoder &) = delete;
+    Encoder(Encoder &&o) noexcept : enc_(std::exchange(o.enc_, nullptr)) {}
+    Encoder &operator=(Encoder &&o) noexcept
+    {
+        if (this != &o) {
+            reset();
+            enc_ = std::exchange(o.enc_, nullptr);
+        }
+        return *this;
+    }
+
+    dxvk_status create(dxvk_variant variant, uint32_t width, uint32_t height,
+                       const dxvk_encode_options *options = nullptr)
+    {
+        reset();
+        return dxvk_encoder_create(variant, width, height, options, &enc_);
+    }
+    void reset()
+    {
+        dxvk_encoder_destroy(enc_);
+        enc_ = nullptr;
+    }
+    bool is_open() const { return enc_ != nullptr; }
+    const dxvk_frame_layout &layout() const { return *dxvk_encoder_layout(enc_); }
+    size_t bound() const
+    {
+        const dxvk_frame_layout &l = layout();
+        return dxvk_encode_bound(l.variant, l.display_width, l.display_height);
+    }
+
+    /* RGBA8 -> packet (resized to the packet size). */
+    dxvk_status encode(const uint8_t *rgba, size_t stride, std::vector<uint8_t> &packet)
+    {
+        if (!enc_)
+            return DXVK_ERR_ARGUMENT;
+        packet.resize(bound());
+        size_t n = 0;
+        dxvk_status st = dxvk_encoder_encode(enc_, rgba, stride, packet.data(), packet.size(), &n);
+        packet.resize(st == DXVK_OK ? n : 0);
+        return st;
+    }
+    /* Blocks-in path: block planes in layout() -> packet. */
+    dxvk_status pack(const void *plane0, const void *plane1, std::vector<uint8_t> &packet)
+    {
+        if (!enc_)
+            return DXVK_ERR_ARGUMENT;
+        packet.resize(bound());
+        const void *planes[2] = {plane0, plane1};
+        size_t n = 0;
+        dxvk_status st = dxvk_encoder_pack(enc_, planes, packet.data(), packet.size(), &n);
+        packet.resize(st == DXVK_OK ? n : 0);
+        return st;
+    }
+    /* RGBA8 -> block planes only (sized by layout().bytes). */
+    dxvk_status compress(const uint8_t *rgba, size_t stride, void *plane0, void *plane1)
+    {
+        if (!enc_)
+            return DXVK_ERR_ARGUMENT;
+        void *planes[2] = {plane0, plane1};
+        return dxvk_encoder_compress(enc_, rgba, stride, planes, layout().bytes);
+    }
+    /* Planes packed by the last encode() (nullptr before). */
+    const void *plane(int i) const { return dxvk_encoder_plane(enc_, i); }
+    dxvk_encoder *handle() const { return enc_; }
+
+private:
+    dxvk_encoder *enc_ = nullptr;
+};
+
+/* Writes a .mov with one DXD3 video track. Move-only; closes on destruction (finish() first). */
+class MovWriter {
+public:
+    MovWriter() = default;
+    ~MovWriter() { close(); }
+    MovWriter(const MovWriter &) = delete;
+    MovWriter &operator=(const MovWriter &) = delete;
+    MovWriter(MovWriter &&o) noexcept : w_(std::exchange(o.w_, nullptr)) {}
+    MovWriter &operator=(MovWriter &&o) noexcept
+    {
+        if (this != &o) {
+            close();
+            w_ = std::exchange(o.w_, nullptr);
+        }
+        return *this;
+    }
+
+    dxvk_status open(const char *path, uint32_t width, uint32_t height, uint32_t timescale,
+                     uint32_t frame_duration)
+    {
+        close();
+        return dxvk_mov_writer_open_file(path, width, height, timescale, frame_duration, &w_);
+    }
+    dxvk_status add(const void *packet, size_t size)
+    {
+        return w_ ? dxvk_mov_writer_add(w_, packet, size) : DXVK_ERR_ARGUMENT;
+    }
+    dxvk_status add(const std::vector<uint8_t> &packet) { return add(packet.data(), packet.size()); }
+    dxvk_status finish() { return w_ ? dxvk_mov_writer_finish(w_) : DXVK_ERR_ARGUMENT; }
+    void close()
+    {
+        dxvk_mov_writer_close(w_);
+        w_ = nullptr;
+    }
+
+private:
+    dxvk_mov_writer *w_ = nullptr;
 };
 
 } // namespace dxvk
