@@ -33,10 +33,10 @@ dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_DXV Normal Quality With Alpha.mo
 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha_Custom.mov: YCG6
 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality With Alpha.mov: YG10
 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality No Alpha.mov: DXT1
--rw-r--r--@ 1 amritrosell  staff  577904 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_DXV Normal Quality With Alpha.mov
--rw-r--r--@ 1 amritrosell  staff  396819 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha_Custom.mov
--rw-r--r--@ 1 amritrosell  staff  647362 Oct  8 17:06 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality With Alpha.mov
--rw-r--r--@ 1 amritrosell  staff  297641 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality No Alpha.mov
+-rw-r--r--@ 1 <user>  staff  577904 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_DXV Normal Quality With Alpha.mov
+-rw-r--r--@ 1 <user>  staff  396819 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha_Custom.mov
+-rw-r--r--@ 1 <user>  staff  647362 Oct  8 17:06 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality With Alpha.mov
+-rw-r--r--@ 1 <user>  staff  297641 Oct  8 17:05 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality No Alpha.mov
 4a28be0 QUESTIONS 22: complete fair Alley comparison (YG10 added); ## main...origin/main
 ```
 END OF HANDOFF w3-alley-fair-compare-r2 sha256:c0813113 2618

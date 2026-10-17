@@ -1,7 +1,7 @@
 ```
 DXVKIT W1 — CLEAN-ROOM DXV, PHASE A (THE "DIRTY ROOM"): WRITE THE FORMAT SPEC AND THE TEST VECTORS, NO DECODER CODE — RUN TO FINISHED
 
-MODE: new project. New folder ~/Documents/claude/DXVKit, new private repo AmritusG/dxvkit (main), licence MIT (Amrit Rosell). This session is the SPEC WRITER only. It writes NO decoder or encoder code at all. A different, fresh session implements later from the spec alone (Phase B).
+MODE: new project. New folder ~/Documents/claude/DXVKit, new private repo AmritusG/dxvkit (main), licence MIT (Amrit). This session is the SPEC WRITER only. It writes NO decoder or encoder code at all. A different, fresh session implements later from the spec alone (Phase B).
 First: create the repo, then cp -p this brief into its docs/handoffs/. Handoffs: dxvkit_<date>_<slug>.md, cp -p to ~/claude-handoffs/.
 
 AMRIT'S WORDS (2026-10-08, verbatim)

@@ -2,7 +2,7 @@
 
 Goal: ONE MIT library that decodes (later also encodes) every DXV variant, used by LoadEhr (C++ FFGL) and
 later replacing the LGPL-2.1 DXV files in Glance / GlEnc / CueGlance / MaCrate (Swift). Licence: MIT,
-Amrit Rosell (`LICENSE`).
+Amrit (`LICENSE`).
 
 ## HARD RULES: the clean-room protocol (binding on every session in this folder)
 

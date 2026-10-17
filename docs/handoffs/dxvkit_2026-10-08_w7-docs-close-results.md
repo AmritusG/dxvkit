@@ -42,7 +42,7 @@ grey 128 shows as 128 / 128 / 128 (WHAT: capture; HOW: play any DXVKit 1.0.0 YCG
 ## RECEIPTS
 ```
 $ git log -1 --format='%H %an %ad %s' --date=iso
-7a033fad8e1acdb7d63988f1248daa738fcd1867 Amrit Rosell 2026-10-08 21:27:14 +0200 DXVKit W7 (Phase A, docs only): close W6-1 and W6-2
+7a033fad8e1acdb7d63988f1248daa738fcd1867 2026-10-08 21:27:14 +0200 DXVKit W7 (Phase A, docs only): close W6-1 and W6-2
 $ git ls-remote origin main refs/tags/v1.0.0 'refs/tags/v1.0.0^{}'
 7a033fad8e1acdb7d63988f1248daa738fcd1867	refs/heads/main
 2aa313aff45d66e334097202913531938e48e9c5	refs/tags/v1.0.0

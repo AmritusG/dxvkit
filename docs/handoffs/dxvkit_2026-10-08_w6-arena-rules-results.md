@@ -147,8 +147,8 @@ ycg6 | 1.0 best | 132064 | 37.710 | 38.058
 $ ls -la test_vectors/streams/arena | wc -l ; du -sh test_vectors test_vectors/streams/arena
 33 files ;  18M test_vectors ; 3.2M arena
 $ ls -la ~/Movies/Testfiles/dxvkit-w6-grey
--rw-r--r--   1 amritrosell  staff   701 Oct  8 20:35 dxvkit-w6_grey128_ycg6-v1.0_1920x1080.mov
--rw-r--r--   1 amritrosell  staff   701 Oct  8 20:35 dxvkit-w6_grey128_ycg6-w3_1920x1080.mov
+-rw-r--r--   1 <user>  staff   701 Oct  8 20:35 dxvkit-w6_grey128_ycg6-v1.0_1920x1080.mov
+-rw-r--r--   1 <user>  staff   701 Oct  8 20:35 dxvkit-w6_grey128_ycg6-w3_1920x1080.mov
 Arena: comp "LoadEhr" (not saved), layer 8 C37/C38 loaded, nothing triggered; Wire not touched.
 ```
 END OF HANDOFF w6-arena-rules-results sha256:920537a6 9332

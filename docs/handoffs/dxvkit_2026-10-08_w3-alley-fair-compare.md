@@ -44,10 +44,10 @@ dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_HQ with alpha.mov: YCG6
 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha.mov: YCG6
 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality with Alpha.mov: DXT1
 HQ with alpha == High Quality No Alpha: identical
--rw-r--r--@ 1 amritrosell  staff  577904 Oct  8 16:57 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_DXV Normal Quality With Alpha.mov
--rw-r--r--@ 1 amritrosell  staff  396819 Oct  8 16:57 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_HQ with alpha.mov
--rw-r--r--@ 1 amritrosell  staff  396819 Oct  8 16:59 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha.mov
--rw-r--r--@ 1 amritrosell  staff  297641 Oct  8 16:56 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality with Alpha.mov
+-rw-r--r--@ 1 <user>  staff  577904 Oct  8 16:57 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_DXV Normal Quality With Alpha.mov
+-rw-r--r--@ 1 <user>  staff  396819 Oct  8 16:57 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_HQ with alpha.mov
+-rw-r--r--@ 1 <user>  staff  396819 Oct  8 16:59 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_High Quality No Alpha.mov
+-rw-r--r--@ 1 <user>  staff  297641 Oct  8 16:56 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle_Normal Quality with Alpha.mov
 ```
 ```
 5af031d QUESTIONS 21: fair Alley comparison on Amrit's export of our exact source

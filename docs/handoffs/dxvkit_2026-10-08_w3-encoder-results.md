@@ -200,7 +200,7 @@ implementation. No accidental exposure. Nothing vendored.
 ## RECEIPTS
 ```
 $ git log -1 --format="%H %an %ad%n%s"; git status -sb | head -1; git ls-remote origin main
-11baeca7b77da51bc32a6e34b65198095ee2fdaf Amrit Rosell Thu Oct 8 16:27:09 2026 +0200
+11baeca7b77da51bc32a6e34b65198095ee2fdaf Thu Oct 8 16:27:09 2026 +0200
 DXVKit W3 (Phase B, clean room): DXV3 encoder for DXT1, DXT5, YCG6, YG10, QuickTime writer
 ## main...origin/main
 11baeca7b77da51bc32a6e34b65198095ee2fdaf	refs/heads/main
@@ -241,19 +241,19 @@ $ build/dxvtool check out/w3/*.mov | tail -1
 out/w3/dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle.mov: no DXV video track
 files 11 (bad 1) | packets 960 | errors 0 | not exactly consumed 0 | exact apart from a dangling-opcode tail (spec 7.5) 0
 $ ls -la out/w3   (git-ignored; Arena layer 6 files)
-drwxr-xr-x  13 amritrosell  staff       416 Oct  8 16:02 .
-drwxr-xr-x   3 amritrosell  staff        96 Oct  8 15:45 ..
--rw-r--r--   1 amritrosell  staff   1938703 Oct  8 16:02 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle.mov
--rw-r--r--   1 amritrosell  staff   2259740 Oct  8 15:50 dxvkit-w3_dxt1-storedflag_testsrc2_333x221.mov
--rw-r--r--   1 amritrosell  staff  11191828 Oct  8 15:45 dxvkit-w3_dxt1_testsrc2_1920x1080.mov
--rw-r--r--   1 amritrosell  staff   4375040 Oct  8 15:47 dxvkit-w3_dxt1_testsrc2_908x2276.mov
--rw-r--r--   1 amritrosell  staff   4517660 Oct  8 15:50 dxvkit-w3_dxt5-storedflag_testsrc2_333x221.mov
--rw-r--r--   1 amritrosell  staff     14246 Oct  8 15:47 dxvkit-w3_dxt5_testsrc2_18x10.mov
--rw-r--r--   1 amritrosell  staff  22739743 Oct  8 15:45 dxvkit-w3_dxt5_testsrc2_1920x1080.mov
--rw-r--r--   1 amritrosell  staff  12277662 Oct  8 15:45 dxvkit-w3_ycg6_testsrc2_1920x1080.mov
--rw-r--r--   1 amritrosell  staff   6272049 Oct  8 15:47 dxvkit-w3_ycg6_testsrc2_908x2276.mov
--rw-r--r--   1 amritrosell  staff  24878562 Oct  8 15:45 dxvkit-w3_yg10_testsrc2_1920x1080.mov
--rw-r--r--   1 amritrosell  staff    898131 Oct  8 15:47 dxvkit-w3_yg10_testsrc2_333x221.mov
+drwxr-xr-x  13 <user>  staff       416 Oct  8 16:02 .
+drwxr-xr-x   3 <user>  staff        96 Oct  8 15:45 ..
+-rw-r--r--   1 <user>  staff   1938703 Oct  8 16:02 dxvkit-w3_alley-source_testsrc2_1920x1080_qtrle.mov
+-rw-r--r--   1 <user>  staff   2259740 Oct  8 15:50 dxvkit-w3_dxt1-storedflag_testsrc2_333x221.mov
+-rw-r--r--   1 <user>  staff  11191828 Oct  8 15:45 dxvkit-w3_dxt1_testsrc2_1920x1080.mov
+-rw-r--r--   1 <user>  staff   4375040 Oct  8 15:47 dxvkit-w3_dxt1_testsrc2_908x2276.mov
+-rw-r--r--   1 <user>  staff   4517660 Oct  8 15:50 dxvkit-w3_dxt5-storedflag_testsrc2_333x221.mov
+-rw-r--r--   1 <user>  staff     14246 Oct  8 15:47 dxvkit-w3_dxt5_testsrc2_18x10.mov
+-rw-r--r--   1 <user>  staff  22739743 Oct  8 15:45 dxvkit-w3_dxt5_testsrc2_1920x1080.mov
+-rw-r--r--   1 <user>  staff  12277662 Oct  8 15:45 dxvkit-w3_ycg6_testsrc2_1920x1080.mov
+-rw-r--r--   1 <user>  staff   6272049 Oct  8 15:47 dxvkit-w3_ycg6_testsrc2_908x2276.mov
+-rw-r--r--   1 <user>  staff  24878562 Oct  8 15:45 dxvkit-w3_yg10_testsrc2_1920x1080.mov
+-rw-r--r--   1 <user>  staff    898131 Oct  8 15:47 dxvkit-w3_yg10_testsrc2_333x221.mov
 Arena: composition "LoadEhr" (Arena 7.28), NOT saved; layer 6 "DXVKit Encoder" added, 10 clips (clip find "dxvkit-w3" -> 10), none triggered; diagnose: no issues at warning level.
 (check: the one "bad" file is the qtrle Alley-source file, which has no DXV track; all 10 DXV files: 960 packets, 0 errors, 0 inexact.)
 $ build/dxvtool bench-encode (speed table source, 32 lines)

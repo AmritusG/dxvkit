@@ -106,7 +106,7 @@ third-party code was vendored.
 ## RECEIPTS
 ```
 $ git log -1 --format="%H %an %ad%n%s"; git status -sb | head -1; git ls-remote origin main
-cdbb4bc0f2407d7c3c88d4b050592e0e1fec2da7 Amrit Rosell Thu Oct 8 13:02:32 2026 +0200
+cdbb4bc0f2407d7c3c88d4b050592e0e1fec2da7 Thu Oct 8 13:02:32 2026 +0200
 DXVKit W2 (Phase B, clean room): C99 DXV decoder, C++ wrapper, SwiftPM package, dxvtool
 ## main...origin/main
 cdbb4bc0f2407d7c3c88d4b050592e0e1fec2da7	refs/heads/main

@@ -9,7 +9,7 @@ written_at: 2026-10-08T09:36:00Z
 # DXVKit W1 results: Phase A (dirty room) spec + test vectors
 
 ## What shipped
-- New private repo **AmritusG/dxvkit** (main), `~/Documents/claude/DXVKit`, MIT (Amrit Rosell). Brief copied
+- New private repo **AmritusG/dxvkit** (main), `~/Documents/claude/DXVKit`, MIT (Amrit). Brief copied
   to `docs/handoffs/`.
 - `docs/spec/DXV_FORMAT.md`: container (FourCC `DXD3` for every DXV3 variant, `DXDI` legacy; sample-entry
   fields as Resolume writes them), the 16x16 padding rule, DXV3 12-byte header, legacy 4-byte header + LZF,
@@ -76,7 +76,7 @@ written_at: 2026-10-08T09:36:00Z
 ## RECEIPTS
 ```
 $ git log -1 --format='%H %an %ad%n%s'
-70e1410fb0d034096ed63ed404f25ce35d2ccdf7 Amrit Rosell Thu Oct 8 11:33:11 2026 +0200
+70e1410fb0d034096ed63ed404f25ce35d2ccdf7 Thu Oct 8 11:33:11 2026 +0200
 DXVKit W1 (Phase A, dirty room): DXV format spec, encoding notes, test vectors
 $ git status -sb | head -1
 ## main...origin/main
